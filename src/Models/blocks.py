@@ -2,6 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+
 class InputNorm(nn.Module):
     def __init__(self, num_features):
         super().__init__()
@@ -12,7 +13,18 @@ class InputNorm(nn.Module):
 
 
 class AugmentedConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, dk, dv, Nh, padding=0, shape=0, stride=1):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        dk,
+        dv,
+        Nh,
+        padding=0,
+        shape=0,
+        stride=1,
+    ):
         super(AugmentedConv, self).__init__()
 
         self.in_channels = in_channels
@@ -26,12 +38,12 @@ class AugmentedConv(nn.Module):
         self.padding = (self.kernel_size - 1) // 2
 
         assert self.Nh != 0, "integer division or modulo by zero, Nh >= 1"
-        assert (
-            self.dk % self.Nh == 0
-        ), "dk should be divided by Nh. (example: out_channels: 20, dk: 40, Nh: 4)"
-        assert (
-            self.dv % self.Nh == 0
-        ), "dv should be divided by Nh. (example: out_channels: 20, dv: 4, Nh: 4)"
+        assert self.dk % self.Nh == 0, (
+            "dk should be divided by Nh. (example: out_channels: 20, dk: 40, Nh: 4)"
+        )
+        assert self.dv % self.Nh == 0, (
+            "dv should be divided by Nh. (example: out_channels: 20, dv: 4, Nh: 4)"
+        )
         assert stride in [1, 2], str(stride) + " Up to 2 strides are allowed."
 
         self.conv_out = nn.Conv1d(
@@ -56,7 +68,9 @@ class AugmentedConv(nn.Module):
         conv_out = self.conv_out(x)
         batch, _, width = conv_out.size()
 
-        flat_q, flat_k, flat_v, q, k, v = self.compute_flat_qkv(x, self.dk, self.dv, self.Nh)
+        flat_q, flat_k, flat_v, q, k, v = self.compute_flat_qkv(
+            x, self.dk, self.dv, self.Nh
+        )
 
         logits = torch.matmul(flat_q.transpose(2, 3), flat_k)
         weights = F.softmax(logits, dim=-1)
@@ -77,7 +91,7 @@ class AugmentedConv(nn.Module):
         v = self.split_heads_1d(v, Nh)
 
         dkh = dk // Nh
-        q = q * dkh ** -0.5
+        q = q * dkh**-0.5
         flat_q = torch.reshape(q, (N, Nh, dk // Nh, W))
         flat_k = torch.reshape(k, (N, Nh, dk // Nh, W))
         flat_v = torch.reshape(v, (N, Nh, dv // Nh, W))
@@ -102,7 +116,9 @@ class SpectralBlock(nn.Module):
         self.bn = nn.BatchNorm1d(out_ch)
         self.leaky = nn.LeakyReLU(0.1)
         # 1x1 conv to match dimensions for the residual add
-        self.shortcut = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+        self.shortcut = (
+            nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+        )
 
     def forward(self, x):
         return self.leaky(self.bn(self.conv(x)) + self.shortcut(x))

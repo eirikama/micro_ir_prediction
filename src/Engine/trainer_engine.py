@@ -1,21 +1,21 @@
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
+
 def run_training(cfg, model, datamodule):
     """Encapsulates the Trainer setup and execution."""
-    
+
     # Define callbacks locally so they are fresh for every run
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
         dirpath="checkpoints",
         filename="best-{epoch:02d}",
         save_top_k=1,
-        mode="min"
+        mode="min",
     )
-    
+
     early_stop = EarlyStopping(
-        monitor="val_loss",
-        patience=cfg.trainer.early_stopping_patience
+        monitor="val_loss", patience=cfg.trainer.early_stopping_patience
     )
 
     trainer = pl.Trainer(
@@ -30,5 +30,5 @@ def run_training(cfg, model, datamodule):
     )
 
     trainer.fit(model, datamodule=datamodule)
-    
+
     return checkpoint_callback.best_model_path
