@@ -1,0 +1,22 @@
+# python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.ipynb_checkpoints/
+
+# lightning
+lightning_logs/
+
+# hydra outputs
+outputs/
+multirun/
+
+# mlflow
+mlruns/
+
+# prediction stores
+*.lmdb
+*.zarr
+
+# checkpoints
+*.ckpt
