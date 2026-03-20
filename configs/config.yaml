@@ -5,6 +5,10 @@ defaults:
   - trainer: default
   - _self_
 
+mlflow:
+  tracking_uri:    "sqlite:////home/eirikmagnussen/Projects/microplastics/mlflow.db"
+  experiment_name: "microplastics"
+
 mode: all  
 ckpt_path: null
 seed: 42  

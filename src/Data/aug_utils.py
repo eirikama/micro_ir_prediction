@@ -1,20 +1,44 @@
 import numpy as np
+from scipy.signal import hilbert
 
-from biospectools_private.physics import cmie
-from biospectools_private.physics import misc
+from src.Physics.mie import q_ext_sca_na
 
+
+
+def get_imagpart(pure_absorbance, wavelength, radius, factor=1):
+    
+    deff = np.pi / 2 * radius * factor
+    imagpart = (pure_absorbance * np.log(10)) / \
+               (4 * np.pi * deff / wavelength)
+    return imagpart
+
+
+def get_nkk(imag_part, wavelengths: np.ndarray, pad_size=200):
+    
+    pad_last_axis = [(0, 0)] * imag_part.ndim
+    pad_last_axis[-1] = (pad_size, pad_size)
+    nkk = np.imag(hilbert(np.pad(imag_part, pad_last_axis, mode='edge')))
+    nkk = nkk[..., pad_size:-pad_size]
+
+    wls_increase = wavelengths[..., 0] < wavelengths[..., -1]
+    if wls_increase:
+        return nkk.copy()
+    else:
+        return -nkk
+
+    
 
 def add_scattering(spec, wn, r, n0, n_im, theta_max, h, scatt_coeff, theta_res=15):
 
     n_const = n0 + n_im * 1j
     wls = 10e3 / wn[None]
 
-    n_i = misc.get_imagpart(spec, wls, r, factor=h)
-    n_r = misc.get_nkk(n_i, wls.squeeze())
+    n_i = get_imagpart(spec, wls, r, factor=h)
+    n_r = get_nkk(n_i, wls.squeeze())
 
     ms = n_const + n_r + 1j * n_i
 
-    Qext, Qsca, QscaNA = cmie.q_ext_sca_na(
+    Qext, Qsca, QscaNA = q_ext_sca_na(
         ms,
         wls,
         r,

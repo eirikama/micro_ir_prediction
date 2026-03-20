@@ -202,7 +202,7 @@ class SpectralDataModule(L.LightningDataModule):
             self.split,
             self.config.zarr_path,
             self.config.spectra_per_plastic * 2,
-            patch_size=32,
+            patch_size=64,
         )
         self.wn = wn
         self.label_encoding = label_encoding
