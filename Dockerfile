@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -23,7 +23,7 @@ RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
     update-alternatives --install /usr/bin/pip pip /usr/local/bin/pip3.12 1
 
-# copy and build sqlite from local file — no network dependency
+# build sqlite from local file — no network dependency
 COPY docker/sqlite-autoconf-3450200.tar.gz /tmp/
 RUN cd /tmp && \
     tar xzf sqlite-autoconf-3450200.tar.gz && \
@@ -34,11 +34,15 @@ RUN cd /tmp && \
     ldconfig && \
     rm -rf /tmp/sqlite-autoconf-3450200*
 
-RUN python -c "import sqlite3; print('SQLite:', sqlite3.sqlite_version)"
+# force python to use the newly built sqlite
+ENV LD_PRELOAD=/usr/local/lib/libsqlite3.so.0
+
+# verify sqlite version — fails build if too old
+RUN echo "import sqlite3\nv = sqlite3.sqlite_version_info\nassert v >= (3,31,0), f'too old: {sqlite3.sqlite_version}'\nprint('SQLite:', sqlite3.sqlite_version)" | python
+
 
 WORKDIR /app
 
-# install pip dependencies — ignore distutils-installed system packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir --ignore-installed -r requirements.txt
 

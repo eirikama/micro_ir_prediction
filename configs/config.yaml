@@ -14,5 +14,5 @@ ckpt_path: null
 seed: 42  
 background_idx: 0  
 top_k_save: 3
-pred_store_path: "/mnt/ssd3/eirik/ProcessedData/saved_predictions.zarr"
+pred_store_path: "/app/outputs/predictions.lmdb"
 project_name: "microplastics_classification"

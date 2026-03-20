@@ -53,7 +53,7 @@ def inference_worker(
             del data, chunk
 
 
-def run_inference(cfg, image_name, ckpt_path, batch_size=1024):
+def run_inference(cfg, image_name, ckpt_path, batch_size=512):
 
     zarr_path = cfg.data.zarr_path
     store = zarr.open(zarr_path, mode="r")
