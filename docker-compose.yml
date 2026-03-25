@@ -8,12 +8,16 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HYDRA_FULL_ERROR=1
     volumes:
       - /mnt/ssd2:/mnt/ssd2:ro
       - /mnt/ssd3:/mnt/ssd3:ro
       - ${PROJECT_DIR}/outputs:/app/outputs
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints
+      - ${PROJECT_DIR}/main.py:/app/main.py
+      - ${PROJECT_DIR}/src:/app/src
+      - ${PROJECT_DIR}/configs:/app/configs
     command: >
       python main.py
       mode=all
@@ -31,3 +35,32 @@ services:
       --backend-store-uri sqlite:////app/mlflow.db
       --host 0.0.0.0
       --port 5000
+
+  jupyter:
+    build: .
+    image: microplastics-predict:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      - "8888:8888"
+    volumes:
+      - /mnt/ssd2:/mnt/ssd2:ro
+      - /mnt/ssd3:/mnt/ssd3:ro
+      - ${PROJECT_DIR}/outputs:/app/outputs
+      - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
+      - ${PROJECT_DIR}/checkpoints:/app/checkpoints
+      - ${PROJECT_DIR}/src:/app/src
+      - ${PROJECT_DIR}/configs:/app/configs
+      - ${PROJECT_DIR}/notebooks:/app/notebooks
+    command: >
+      jupyter notebook
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --NotebookApp.token=''
+      --NotebookApp.password=''
+      --notebook-dir=/app/notebooks
+    working_dir: /app

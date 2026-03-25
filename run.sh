@@ -2,6 +2,7 @@
 #!/bin/bash
 
 docker run --gpus all \
+    -t \
     -e HYDRA_FULL_ERROR=1 \
     -v /mnt/ssd2:/mnt/ssd2:ro \
     -v /mnt/ssd3:/mnt/ssd3:ro \

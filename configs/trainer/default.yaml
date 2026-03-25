@@ -1,5 +1,5 @@
 _target_: config_schema.TrainerConfig 
 
-max_epochs: 5000
-early_stopping_patience: 50
+max_epochs: 50000
+early_stopping_patience: 500
 devices: 1

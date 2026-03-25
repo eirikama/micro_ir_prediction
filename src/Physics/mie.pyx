@@ -29,7 +29,7 @@ def mie_pi_tao(thetas, nmax):
     pi_n = np.array([
         [scipy.special.lpmv(0, n, c) for n in range(nmax + 1)]
         for c in cos_t
-    ])   # shape: (n_thetas, nmax+1)
+    ])   
     
     tao_n = ns * cos_t[:, None] * pi_n[:, 1:] - (ns + 1) * pi_n[:, :-1]
     return pi_n[:, 1:].copy(), tao_n
