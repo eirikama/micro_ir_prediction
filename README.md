@@ -46,7 +46,7 @@ microscopy_prediction/
 │   │   └── default.yaml              # data and augmentation config
 │   ├── model/
 │   │   └── aacnn.yaml                # model architecture config
-│   └── trainer/  
+│   └── trainer/
 │       └── default.yaml              # PyTorch Lightning trainer config
 │
 ├── src/

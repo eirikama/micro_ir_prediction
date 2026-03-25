@@ -9,11 +9,11 @@ mlflow:
   tracking_uri:    "sqlite:////app/mlflow.db"
   experiment_name: "microplastics"
 
-mode: all  
+mode: all
 ckpt_path: null
-seed: 42  
-background_idx: 0  
-bg_threshold: 0.5  
+seed: 42
+background_idx: 0
+bg_threshold: 0.5
 top_k_save: 3
 pred_store_path: "/app/outputs/predictions.lmdb"
 project_name: "microplastics_classification"

@@ -1,14 +1,13 @@
-import torch
-import pytorch_lightning as L
-from torch.utils.data import IterableDataset, DataLoader
-
 import random
-import zarr
-import numpy as np
-from collections import defaultdict
-from sklearn.model_selection import train_test_split
 
-from src.Data.aug_utils import add_polynomial, add_co2, add_whitenoise, add_scattering
+import numpy as np
+import pytorch_lightning as L
+import torch
+import zarr
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, IterableDataset
+
+from src.Data.aug_utils import add_co2, add_polynomial, add_scattering
 
 
 def create_experiment_split(zarr_path, split_ratio=0.5):
@@ -32,7 +31,6 @@ def get_training_data(
     N=8,
     patch_size=128,
 ):
-
     root = zarr.open(zarr_path, mode="r")
     images_group = root["images"]
     wn = np.asarray(root.attrs["wavenumbers"], dtype=np.float32)
@@ -51,14 +49,14 @@ def get_training_data(
             name = names[rng.integers(len(names))]
             z_arr = images_group[name]["data"]
 
-            h, w, l = z_arr.shape
-            max_h = max(1, h - patch_size)
-            max_w = max(1, w - patch_size)
-            y0 = rng.integers(0, max_h) if h > patch_size else 0
-            x0 = rng.integers(0, max_w) if w > patch_size else 0
+            H, W, L = z_arr.shape
+            max_h = max(1, H - patch_size)
+            max_w = max(1, W - patch_size)
+            y0 = rng.integers(0, max_h) if H > patch_size else 0
+            x0 = rng.integers(0, max_w) if W > patch_size else 0
 
             patch = z_arr[y0 : y0 + patch_size, x0 : x0 + patch_size]
-            spectra = patch.reshape(-1, l)
+            spectra = patch.reshape(-1, L)
             means = spectra.mean(axis=1)
 
             spec_mask = means > 0.5
@@ -141,20 +139,18 @@ class SpectralDataset(IterableDataset):
             s_subset -= s_subset.min(axis=1, keepdims=True)
             s_subset /= s_subset.max(axis=1, keepdims=True) + 1e-9
 
-            n0s, rs, n_ims, hs, scs = [
-                np.random.uniform(l, h, (s_subset.shape[0], 1))
-                for l, h in [
+            n0s, rs, n_ims, hs, scs = (
+                np.random.uniform(low, high, (s_subset.shape[0], 1))
+                for low, high in [
                     (1.25, 1.65),
                     (2.0, 14),
                     (1e-4, 1e-2),
                     (1.5, 2.5),
                     (1.5, 2.5),
                 ]
-            ]
-            theta_max = np.random.uniform(0.2, 0.45)
-            s[mie_mask] = add_scattering(
-                s_subset, self.wn, rs, n0s, n_ims, theta_max, hs, scs
             )
+            theta_max = np.random.uniform(0.2, 0.45)
+            s[mie_mask] = add_scattering(s_subset, self.wn, rs, n0s, n_ims, theta_max, hs, scs)
 
         # --- Vectorized Polynomials ---
         poly_mask = is_signal & (np.random.rand(B) < self.config.poly_ratio)
@@ -163,6 +159,7 @@ class SpectralDataset(IterableDataset):
         for mask, ranges in zip(
             [poly_mask, bkg_mask],
             [self.config.param_ranges, self.config.bkg_param_ranges],
+            strict=False,
         ):
             if mask.any():
                 n_samples = np.sum(mask)
@@ -198,7 +195,7 @@ class SpectralDataModule(L.LightningDataModule):
         self.steps_per_epoch = 0
 
     def setup(self, stage=None):
-        l, s, wn, label_encoding = get_training_data(
+        label, spectra, wn, label_encoding = get_training_data(
             self.split,
             self.config.zarr_path,
             self.config.spectra_per_plastic * 2,
@@ -208,7 +205,7 @@ class SpectralDataModule(L.LightningDataModule):
         self.label_encoding = label_encoding
 
         s_train, s_val, l_train, l_val = train_test_split(
-            s, l, test_size=0.5, stratify=l, random_state=42
+            spectra, label, test_size=0.5, stratify=label, random_state=42
         )
 
         self.steps_per_epoch = len(l_train) // self.config.batch_size

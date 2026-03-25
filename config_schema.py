@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import List
 
 
 @dataclass
@@ -10,7 +9,7 @@ class ModelConfig:
     num_classes: int = 9
 
     gamma: float = 1.0
-    alpha: List[float] = field(default_factory=list)
+    alpha: list[float] = field(default_factory=list)
     lr: float = 1e-4
     weight_decay: float = 1e-3
 
@@ -34,9 +33,9 @@ class DataConfig:
     noise_ratio: float = 0.6
     co2_ratio: float = 0.2
 
-    param_ranges: List[List[float]] = field(default_factory=list)
-    bkg_param_ranges: List[List[float]] = field(default_factory=list)
-    co2_params: List[float] = field(default_factory=list)
+    param_ranges: list[list[float]] = field(default_factory=list)
+    bkg_param_ranges: list[list[float]] = field(default_factory=list)
+    co2_params: list[float] = field(default_factory=list)
 
 
 @dataclass

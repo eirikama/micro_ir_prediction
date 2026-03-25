@@ -1,6 +1,6 @@
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class InputNorm(nn.Module):
@@ -25,7 +25,7 @@ class AugmentedConv(nn.Module):
         shape=0,
         stride=1,
     ):
-        super(AugmentedConv, self).__init__()
+        super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -38,12 +38,12 @@ class AugmentedConv(nn.Module):
         self.padding = (self.kernel_size - 1) // 2
 
         assert self.Nh != 0, "integer division or modulo by zero, Nh >= 1"
-        assert self.dk % self.Nh == 0, (
-            "dk should be divided by Nh. (example: out_channels: 20, dk: 40, Nh: 4)"
-        )
-        assert self.dv % self.Nh == 0, (
-            "dv should be divided by Nh. (example: out_channels: 20, dv: 4, Nh: 4)"
-        )
+        assert (
+            self.dk % self.Nh == 0
+        ), "dk should be divided by Nh. (example: out_channels: 20, dk: 40, Nh: 4)"
+        assert (
+            self.dv % self.Nh == 0
+        ), "dv should be divided by Nh. (example: out_channels: 20, dv: 4, Nh: 4)"
         assert stride in [1, 2], str(stride) + " Up to 2 strides are allowed."
 
         self.conv_out = nn.Conv1d(
@@ -68,9 +68,7 @@ class AugmentedConv(nn.Module):
         conv_out = self.conv_out(x)
         batch, _, width = conv_out.size()
 
-        flat_q, flat_k, flat_v, q, k, v = self.compute_flat_qkv(
-            x, self.dk, self.dv, self.Nh
-        )
+        flat_q, flat_k, flat_v, q, k, v = self.compute_flat_qkv(x, self.dk, self.dv, self.Nh)
 
         logits = torch.matmul(flat_q.transpose(2, 3), flat_k)
         weights = F.softmax(logits, dim=-1)
@@ -116,9 +114,7 @@ class SpectralBlock(nn.Module):
         self.bn = nn.BatchNorm1d(out_ch)
         self.leaky = nn.LeakyReLU(0.1)
         # 1x1 conv to match dimensions for the residual add
-        self.shortcut = (
-            nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
-        )
+        self.shortcut = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
 
     def forward(self, x):
         return self.leaky(self.bn(self.conv(x)) + self.shortcut(x))

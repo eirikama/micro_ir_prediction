@@ -42,7 +42,7 @@ COPY requirements.txt .
 RUN uv pip install --system --no-cache \
     --index-url https://download.pytorch.org/whl/cu121 \
     torch torchvision
-    
+
 RUN uv pip install --system --no-cache -r requirements.txt
 
 COPY . .

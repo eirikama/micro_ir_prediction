@@ -1,9 +1,10 @@
-import zarr
-import zarr.storage
-import numpy as np
+import warnings
 from contextlib import contextmanager
 
-import warnings
+import numpy as np
+import zarr
+import zarr.storage
+
 warnings.filterwarnings(
     "ignore",
     message=".*LMDBStore is deprecated.*",
@@ -14,11 +15,12 @@ warnings.filterwarnings(
 @contextmanager
 def open_pred_store(path: str, map_size_tb: float = 1.0):
     store = zarr.LMDBStore(path, map_size=int(map_size_tb * 1e12))
-    grp   = zarr.open_group(store, mode="a")
+    grp = zarr.open_group(store, mode="a")
     try:
         yield grp
     finally:
-        store.close()   # guaranteed even if inference crashes mid-loop
+        store.close()  # guaranteed even if inference crashes mid-loop
+
 
 def _chunk_for(H: int, W: int, max_mb: float = 8.0) -> tuple[int, int]:
     """

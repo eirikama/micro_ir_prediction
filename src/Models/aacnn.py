@@ -1,11 +1,11 @@
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
-import torchmetrics
 import torch.nn.functional as F
+import torchmetrics
 
-from src.Models.blocks import SpectralBlock, InputNorm, AugmentedConv
 from src.loss import FocalLoss
+from src.Models.blocks import AugmentedConv, InputNorm
 
 
 class AACNN(pl.LightningModule):
@@ -16,9 +16,7 @@ class AACNN(pl.LightningModule):
 
         self.input_norm = InputNorm(1)
 
-        self.aconv_1 = AugmentedConv(
-            1, config.conv_channels, config.kernel_size, dk=1, dv=1, Nh=1
-        )
+        self.aconv_1 = AugmentedConv(1, config.conv_channels, config.kernel_size, dk=1, dv=1, Nh=1)
         self.bn_1 = nn.BatchNorm1d(config.conv_channels)
 
         self.aconv_2 = AugmentedConv(
@@ -31,9 +29,7 @@ class AACNN(pl.LightningModule):
         )
         self.bn_2 = nn.BatchNorm1d(config.conv_channels)
 
-        self.aconv_3 = AugmentedConv(
-            config.conv_channels, 8, config.kernel_size, dk=4, dv=4, Nh=2
-        )
+        self.aconv_3 = AugmentedConv(config.conv_channels, 8, config.kernel_size, dk=4, dv=4, Nh=2)
         self.bn_3 = nn.BatchNorm1d(8)
 
         self.adaptive_pool = nn.AdaptiveAvgPool1d(95)
@@ -48,12 +44,8 @@ class AACNN(pl.LightningModule):
         alpha_weights = torch.tensor(config.alpha)
         self.loss_fn = FocalLoss(gamma=config.gamma, alpha=alpha_weights)
 
-        self.train_acc = torchmetrics.Accuracy(
-            task="multiclass", num_classes=config.num_classes
-        )
-        self.val_acc = torchmetrics.Accuracy(
-            task="multiclass", num_classes=config.num_classes
-        )
+        self.train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=config.num_classes)
+        self.val_acc = torchmetrics.Accuracy(task="multiclass", num_classes=config.num_classes)
 
     def forward(self, x):
         x = self.input_norm(x)
