@@ -5,11 +5,12 @@ mlflow_skinny==3.10.1
 mlflow_tracing==3.10.1
 numpy==2.4.3
 omegaconf==2.3.0
-pytorch_lightning==2.6.1
+pytorch_lightning==2.5.0
+torchvision==0.20.1
+torchmetrics==1.6.1
 scikit_learn==1.8.0
-torch==2.6.0
-torchmetrics==1.9.0
 tqdm==4.67.1
 zarr==2.18.7
 Cython==0.29.37
 lmdb==2.0
+jupyterlab==4.4.0

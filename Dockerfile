@@ -40,10 +40,16 @@ WORKDIR /app
 COPY requirements.txt .
 
 RUN uv pip install --system --no-cache \
-    --index-url https://download.pytorch.org/whl/cu121 \
-    torch torchvision
+    --extra-index-url https://download.pytorch.org/whl/cu121 \
+    --index-strategy unsafe-best-match \
+    torch==2.5.1+cu121 \
+    torchvision==0.20.1+cu121 \
+    torchaudio==2.5.1+cu121
 
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN uv pip install --system --no-cache \
+    --extra-index-url https://download.pytorch.org/whl/cu121 \
+    --index-strategy unsafe-best-match \
+    -r requirements.txt
 
 COPY . .
 
