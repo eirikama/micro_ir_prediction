@@ -1,16 +1,20 @@
+import os
+
 import numpy as np
 from Cython.Build import cythonize
-from distutils.extension import Extension
-from setuptools import setup
+from setuptools import Extension, setup
+
+os.environ["CC"] = "gcc"
 
 ext = Extension(
     name="mie",
     sources=["mie.pyx"],
     include_dirs=[np.get_include()],
-    extra_compile_args=["-O3", "-march=native", "-fopenmp"],
+    extra_compile_args=["-O3", "-march=native", "-ffast-math", "-fopenmp", "-funroll-loops"],
     extra_link_args=["-fopenmp"],
     libraries=["m"],
     language="c++",
+    define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
 )
 
 setup(
@@ -19,5 +23,13 @@ setup(
         ext,
         language_level=3,
         annotate=False,
+        compiler_directives={
+            "language_level": "3",
+            "boundscheck": False,
+            "wraparound": False,
+            "cdivision": True,
+            "nonecheck": False,
+            "initializedcheck": False,
+        },
     ),
 )
