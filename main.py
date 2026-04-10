@@ -4,6 +4,7 @@ import logging
 import platform
 import time
 from collections import defaultdict
+import git
 
 import hydra
 import mlflow
@@ -47,6 +48,17 @@ def main(cfg: DictConfig):
 
     run_name = f"N{cfg.data.spectra_per_plastic}_seed{cfg.seed}"
 
+    repo_path = hydra.utils.get_original_cwd()
+    try:
+        repo = git.Repo(repo_path, search_parent_directories=True)
+        commit_hash = repo.head.object.hexsha
+        is_dirty = repo.is_dirty()
+        # Capture uncommitted changes
+        git_diff = repo.git.diff(repo.head.commit) if is_dirty else "No uncommitted changes."
+    except Exception as e:
+        log.warning(f"Could not capture git state: {e}")
+        commit_hash, is_dirty, git_diff = "unknown", None, "N/A"
+
     mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
     mlflow.set_experiment(cfg.mlflow.experiment_name)
 
@@ -62,6 +74,13 @@ def main(cfg: DictConfig):
 
             params = OmegaConf.to_container(cfg, resolve=True)
             mlflow.log_params(params)
+            mlflow.set_tags({
+                "git.commit": commit_hash,
+                "git.is_dirty": str(is_dirty),
+                "git.branch": repo.active_branch.name if commit_hash != "unknown" else "N/A"
+            })
+
+            mlflow.log_text(git_diff, "git_patch.diff")
 
             gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
 

@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
 
-from src.loss import FocalLoss
+from src.Models.loss import FocalLoss
 from src.Models.blocks import AugmentedConv, InputNorm
 
 
