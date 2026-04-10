@@ -209,6 +209,7 @@ class SpectralDataModule(L.LightningDataModule):
         )
 
         self.steps_per_epoch = len(l_train) // self.config.batch_size
+        self.val_batches = len(l_val) // self.config.batch_size
 
         self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.config)
         self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.config)

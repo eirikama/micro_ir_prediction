@@ -18,7 +18,9 @@ class ModelConfig:
 class TrainerConfig:
     Nruns: int = 10
     max_epochs: int = 500
-    early_stopping_patience: int = 5
+    early_stopping_patience: int = 500
+    val_every_n_epochs: int = 5
+    log_every_n_epochs: int = 5
     devices: int = 1
 
 

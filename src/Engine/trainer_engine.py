@@ -1,18 +1,7 @@
-import logging
-import warnings
-
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
-warnings.filterwarnings("ignore", ".*tensorboardX.*")
-warnings.filterwarnings("ignore", ".*litlogger.*")
-warnings.filterwarnings("ignore", ".*limit_train_batches.*")
-warnings.filterwarnings("ignore", ".*does not have many workers.*")
-warnings.filterwarnings("ignore", ".*smaller than the logging interval.*")
-warnings.filterwarnings("ignore", ".*Checkpoint directory.*exists and is not empty.*")
-warnings.filterwarnings("ignore", ".*Precision 16-mixed is not supported by the model summary.*")
-
-logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
+from src.Engine.callbacks import ExtendedLogger
 
 
 def run_training(cfg, model, datamodule, logger=None):
@@ -24,9 +13,11 @@ def run_training(cfg, model, datamodule, logger=None):
         mode="max",
     )
 
+    patience = cfg.trainer.early_stopping_patience // cfg.trainer.val_every_n_epochs
+
     early_stop = EarlyStopping(
         monitor="val_acc",
-        patience=cfg.trainer.early_stopping_patience,
+        patience=patience,
         verbose=False,
         mode="max",
     )
@@ -36,10 +27,11 @@ def run_training(cfg, model, datamodule, logger=None):
         accelerator="gpu",
         devices=cfg.trainer.devices,
         precision="16-mixed",
-        callbacks=[checkpoint_callback, early_stop],
+        callbacks=[checkpoint_callback, early_stop, ExtendedLogger()],
         limit_train_batches=datamodule.steps_per_epoch,
-        limit_val_batches=10,
-        log_every_n_steps=10,
+        limit_val_batches=datamodule.val_batches,
+        log_every_n_steps=cfg.trainer.log_every_n_epochs,
+        check_val_every_n_epoch=cfg.trainer.val_every_n_epochs,
         enable_progress_bar=False,
         enable_model_summary=False,
         num_sanity_val_steps=0,
@@ -56,7 +48,7 @@ def run_training(cfg, model, datamodule, logger=None):
 
     return (
         trainer.checkpoint_callback.best_model_path,
-        best_score,  # ← comma fixed
+        best_score,
         trainer.current_epoch,
         stopped_early,
     )

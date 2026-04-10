@@ -74,8 +74,8 @@ class AACNN(pl.LightningModule):
         loss = self.loss_fn(logits.float(), y)
         acc = self.train_acc(logits, y)
 
-        self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("train_acc", acc, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("train_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("train_acc", acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -84,8 +84,8 @@ class AACNN(pl.LightningModule):
         loss = self.loss_fn(logits.float(), y)
         acc = self.val_acc(logits, y)
 
-        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("val_acc", acc, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("val_acc", acc, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
         return loss
 
     def on_validation_epoch_end(self):

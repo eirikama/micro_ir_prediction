@@ -1,4 +1,5 @@
 import gc
+import getpass
 import logging
 import platform
 import time
@@ -20,6 +21,7 @@ from src.Engine.inference_engine import run_inference
 from src.Engine.save_inference import open_pred_store, save_inference_outputs_zarr
 from src.Engine.trainer_engine import run_training
 from src.Models.aacnn import AACNN
+from src.utils.warnings import silence_warnings
 
 log = logging.getLogger(__name__)
 
@@ -31,70 +33,70 @@ cs.store(group="trainer", name="trainer_config", node=TrainerConfig)
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
 def main(cfg: DictConfig):
+    silence_warnings()
     pl.seed_everything(cfg.seed)
 
     model_cfg = hydra.utils.instantiate(cfg.model)
     data_cfg = hydra.utils.instantiate(cfg.data)
 
-    train_test_split = create_experiment_split(data_cfg.zarr_path, split_ratio=0.9)
+    train_test_split = create_experiment_split(data_cfg.zarr_path, split_ratio=0.5)
 
     datamodule = SpectralDataModule(train_test_split["train"], data_cfg)
     datamodule.setup()
     label_encoding = datamodule.label_encoding
 
+    run_name = f"N{cfg.data.spectra_per_plastic}_seed{cfg.seed}"
+
     mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
     mlflow.set_experiment(cfg.mlflow.experiment_name)
 
-    run_name = f"N{cfg.data.spectra_per_plastic}_seed{cfg.seed}"
+    mlf_logger = MLFlowLogger(
+        experiment_name=cfg.mlflow.experiment_name,
+        tracking_uri=cfg.mlflow.tracking_uri,
+        run_name=run_name,
+    )
 
-    with mlflow.start_run(run_name=run_name) as run:
+    with mlflow.start_run(run_id=mlf_logger.run_id) as run:
         try:
-            run_id = run.info.run_id
-            log.info("MLflow run started: %s  run_id: %s", run_name, run_id)
+            log.info("MLflow run started: %s | ID: %s", run_name, run.info.run_id)
 
-            mlflow.log_params(
+            params = OmegaConf.to_container(cfg, resolve=True)
+            mlflow.log_params(params)
+
+            gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+
+            mlflow.set_tags(
                 {
-                    "N": cfg.data.spectra_per_plastic,
-                    "seed": cfg.seed,
-                    "lr": cfg.model.lr,
-                    "batch_size": cfg.data.batch_size,
-                    "max_epochs": cfg.trainer.max_epochs,
                     "mode": cfg.mode,
-                    "bg_threshold": cfg.bg_threshold,
-                    "background_idx": cfg.background_idx,
-                    "top_k_save": cfg.top_k_save,
+                    "spectra_per_plastic": cfg.data.spectra_per_plastic,
+                    "user": getpass.getuser(),
                     "python_version": platform.python_version(),
                     "torch_version": torch.__version__,
-                    "cuda_available": torch.cuda.is_available(),
-                    "gpu_name": torch.cuda.get_device_name(0)
-                    if torch.cuda.is_available()
-                    else "cpu",
-                    "gpu_count": torch.cuda.device_count(),
+                    "gpu_count": gpu_count,
+                    "all_gpu_names": [torch.cuda.get_device_name(i) for i in range(gpu_count)]
+                    if gpu_count > 0
+                    else "N/A",
+                    "Hardware/gpu_memory_GB": torch.cuda.get_device_properties(0).total_memory
+                    / 1e9,
                     "hostname": platform.node(),
+                    "status": "running",
                 }
             )
 
             mlflow.log_dict(label_encoding, "label_encoding.json")
-
             mlflow.log_text(OmegaConf.to_yaml(cfg), "hydra_config.yaml")
-            mlflow.set_tags(
-                {
-                    "mode": cfg.mode,
-                    "N": str(cfg.data.spectra_per_plastic),
-                    "seed": str(cfg.seed),
-                }
-            )
 
             # ── train ─────────────────────────────────────────────────────────
             if cfg.mode in ["train", "all"]:
                 model = AACNN(model_cfg)
-                n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-                log.info("Trainable parameters: %d", n_params)
 
-                mlf_logger = MLFlowLogger(
-                    experiment_name=cfg.mlflow.experiment_name,
-                    tracking_uri=cfg.mlflow.tracking_uri,
-                    run_id=run_id,
+                mlflow.log_params(
+                    {
+                        "Model/n_params_trainable": sum(
+                            p.numel() for p in model.parameters() if p.requires_grad
+                        ),
+                        "Model/n_params_total": sum(p.numel() for p in model.parameters()),
+                    }
                 )
 
                 t0 = time.time()
@@ -103,15 +105,20 @@ def main(cfg: DictConfig):
                     cfg, model, datamodule, mlf_logger
                 )
 
-                train_sec = time.time() - t0
-                mlflow.log_metric("Timer/train_duration_min", train_sec / 60)
+                train_seconds = time.time() - t0
 
                 mlflow.log_metrics(
                     {
-                        "best_val_score": best_score,
-                        "final_epoch": final_epoch,
+                        "Timer/train_duration_minutes": train_seconds / 60,
+                        "Timer/epochs_per_second": final_epoch / train_seconds,
+                        "Timer/samples_per_second": final_epoch
+                        * cfg.data.batch_size
+                        / train_seconds,
+                        "Accuracy/best_val_acc": best_score,
+                        "Trainer/final_epoch": final_epoch,
                     }
                 )
+
                 mlflow.set_tag("stopped_early", str(stopped_early))
 
                 with open_dict(cfg):
@@ -166,7 +173,7 @@ def main(cfg: DictConfig):
                                 hparams={
                                     "lr": cfg.model.lr,
                                     "batch_size": cfg.data.batch_size,
-                                    "mlflow_run": run_id,
+                                    "mlflow_run": run.info.run_id,
                                 },
                             )
 
