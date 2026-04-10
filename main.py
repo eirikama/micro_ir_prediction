@@ -67,6 +67,8 @@ def main(cfg: DictConfig):
 
             mlflow.set_tags(
                 {
+                    "mlflow_id": run.info.run_id,
+                    "mlflow_name": run_name,
                     "mode": cfg.mode,
                     "spectra_per_plastic": cfg.data.spectra_per_plastic,
                     "user": getpass.getuser(),

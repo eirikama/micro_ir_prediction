@@ -23,8 +23,11 @@ services:
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints
       - ${PROJECT_DIR}/main.py:/app/main.py
-      - ${PROJECT_DIR}/src:/app/src
       - ${PROJECT_DIR}/configs:/app/configs
+      - ${PROJECT_DIR}/src/Data:/app/src/Data
+      - ${PROJECT_DIR}/src/Engine:/app/src/Engine
+      - ${PROJECT_DIR}/src/Models:/app/src/Models
+      - ${PROJECT_DIR}/src/utils:/app/src/utils
     command: >
       python main.py
       mode=all
@@ -67,7 +70,10 @@ services:
       - ${PROJECT_DIR}/outputs:/app/outputs
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints
-      - ${PROJECT_DIR}/src:/app/src
+      - ${PROJECT_DIR}/src/Data:/app/src/Data
+      - ${PROJECT_DIR}/src/Engine:/app/src/Engine
+      - ${PROJECT_DIR}/src/Models:/app/src/Models
+      - ${PROJECT_DIR}/src/utils:/app/src/utils
       - ${PROJECT_DIR}/configs:/app/configs
       - ${PROJECT_DIR}/notebooks:/app/notebooks
     command: >

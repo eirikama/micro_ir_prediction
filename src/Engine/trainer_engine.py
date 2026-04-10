@@ -17,7 +17,7 @@ def run_training(cfg, model, datamodule, logger=None):
 
     early_stop = EarlyStopping(
         monitor="val_acc",
-        patience=patience,
+        patience=max(5, patience),
         verbose=False,
         mode="max",
     )
@@ -30,7 +30,7 @@ def run_training(cfg, model, datamodule, logger=None):
         callbacks=[checkpoint_callback, early_stop, ExtendedLogger()],
         limit_train_batches=datamodule.steps_per_epoch,
         limit_val_batches=datamodule.val_batches,
-        log_every_n_steps=cfg.trainer.log_every_n_epochs,
+        log_every_n_steps=datamodule.steps_per_epoch,
         check_val_every_n_epoch=cfg.trainer.val_every_n_epochs,
         enable_progress_bar=False,
         enable_model_summary=False,
