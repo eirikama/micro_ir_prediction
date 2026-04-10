@@ -3,6 +3,7 @@ defaults:
   - model: aacnn
   - data: default
   - trainer: default
+  - inference: default
   - _self_
 
 mlflow:
@@ -10,10 +11,6 @@ mlflow:
   experiment_name: "microplastics_raw"
 
 mode: all
-ckpt_path: null
 seed: 42
-background_idx: 0
-bg_threshold: 0.5
-top_k_save: 3
-pred_store_path: "/app/outputs/predictions_raw.lmdb"
+
 project_name: "microplastics_classification"

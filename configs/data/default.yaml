@@ -3,6 +3,12 @@ _target_: config_schema.DataConfig
 zarr_path: "/mnt/ssd3/eirik/ProcessedData/microplastics_library.zarr"
 spectra_per_plastic: 64
 batch_size: 64
+train_split_size: 0.5
+val_split_size: 0.5
+
+sample_min: 0.5
+background_max: 0.1
+
 mie_ratio:  0.
 poly_ratio:  0.
 bkg_poly_ratio: 0.
@@ -24,3 +30,17 @@ bkg_param_ranges: [
 ]
 
 co2_params: [2300, 2400, 10, 0.0, 0.4, 30, 5, 6]
+
+max_noise_level: 0.05
+theta_min: 0.2
+theta_max: 0.45
+n0_min: 1.25
+n0_max: 1.65
+r_min: 2.0
+r_max: 14.0
+n_imag_min: 1e-4
+n_imag_max: 1e-2
+h_min: 1.5
+h_max: 2.5
+scale_min: 1.5
+scale_max: 2.5

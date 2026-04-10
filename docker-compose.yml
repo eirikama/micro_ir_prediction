@@ -24,6 +24,7 @@ services:
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints
       - ${PROJECT_DIR}/main.py:/app/main.py
+      - ${PROJECT_DIR}/config_schema.py:/app/config_schema.py
       - ${PROJECT_DIR}/configs:/app/configs
       - ${PROJECT_DIR}/src/Data:/app/src/Data
       - ${PROJECT_DIR}/src/Engine:/app/src/Engine

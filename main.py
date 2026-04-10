@@ -16,7 +16,7 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning.loggers import MLFlowLogger
 
-from config_schema import DataConfig, ModelConfig, TrainerConfig
+from config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
 from src.Data.data_utils import SpectralDataModule, create_experiment_split
 from src.Engine.inference_engine import run_inference
 from src.Engine.save_inference import open_pred_store, save_inference_outputs_zarr
@@ -39,6 +39,7 @@ cs = ConfigStore.instance()
 cs.store(group="model", name="aacnn_config", node=ModelConfig)
 cs.store(group="data", name="data_config", node=DataConfig)
 cs.store(group="trainer", name="trainer_config", node=TrainerConfig)
+cs.store(group="inference", name="inference_config", node=InferenceConfig)
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
@@ -47,12 +48,10 @@ def main(cfg: DictConfig):
     silence_warnings()
     pl.seed_everything(cfg.seed)
 
-    model_cfg = hydra.utils.instantiate(cfg.model)
-    data_cfg = hydra.utils.instantiate(cfg.data)
 
-    train_test_split = create_experiment_split(data_cfg.zarr_path, split_ratio=0.5)
+    train_test_split = create_experiment_split(cfg.data.zarr_path, split_ratio=cfg.data.train_split_size)
 
-    datamodule = SpectralDataModule(train_test_split["train"], data_cfg)
+    datamodule = SpectralDataModule(train_test_split["train"], cfg.data)
     datamodule.setup()
     label_encoding = datamodule.label_encoding
 
@@ -63,7 +62,6 @@ def main(cfg: DictConfig):
         repo = git.Repo(repo_path, search_parent_directories=True)
         commit_hash = repo.head.object.hexsha
         is_dirty = repo.is_dirty()
-        # Capture uncommitted changes
         git_diff = repo.git.diff(repo.head.commit) if is_dirty else "No uncommitted changes."
     except Exception as e:
         log.warning(f"Could not capture git state: {e}")
@@ -119,7 +117,7 @@ def main(cfg: DictConfig):
 
             # ── train ─────────────────────────────────────────────────────────
             if cfg.mode in ["train", "all"]:
-                model = AACNN(model_cfg)
+                model = AACNN(cfg.model)
 
                 mlflow.log_params(
                     {
@@ -153,7 +151,7 @@ def main(cfg: DictConfig):
                 mlflow.set_tag("stopped_early", str(stopped_early))
 
                 with open_dict(cfg):
-                    cfg.ckpt_path = best_path
+                    cfg.inference.ckpt_path = best_path
 
                 mlflow.set_tag("ckpt_path", best_path)
                 log.info("Training complete. Best checkpoint: %s", best_path)
@@ -165,7 +163,7 @@ def main(cfg: DictConfig):
             ################# infer ##################
 
             if cfg.mode in ["infer", "all"]:
-                if not cfg.ckpt_path:
+                if not cfg.inference.ckpt_path:
                     raise ValueError("ckpt_path must be set to run inference.")
 
                 test_images = train_test_split["test"]
@@ -175,7 +173,7 @@ def main(cfg: DictConfig):
                 log.info("Starting inference on %d images...", len(test_images))
 
                 t_infer_start = time.time()
-                with open_pred_store(cfg.pred_store_path) as pred_store:
+                with open_pred_store(cfg.inference.pred_store_path) as pred_store:
                     for i, img_data in enumerate(test_images):
                         img_name = img_data["name"]
                         img_label = img_data["label"]
@@ -189,7 +187,8 @@ def main(cfg: DictConfig):
                             prob_map = run_inference(
                                 cfg,
                                 image_name=img_name,
-                                ckpt_path=cfg.ckpt_path,
+                                ckpt_path=cfg.inference.ckpt_path,
+                                batch_size=cfg.inference.batch_size,
                             )
 
                             save_inference_outputs_zarr(
@@ -198,8 +197,8 @@ def main(cfg: DictConfig):
                                 store=pred_store,
                                 N=cfg.data.spectra_per_plastic,
                                 seed=cfg.seed,
-                                background_idx=cfg.background_idx,
-                                top_k_save=cfg.top_k_save,
+                                background_idx=cfg.inference.background_idx,
+                                top_k_save=cfg.inference.top_k_save,
                                 true_idx=true_idx,
                                 hparams={
                                     "lr": cfg.model.lr,
@@ -208,9 +207,9 @@ def main(cfg: DictConfig):
                                 },
                             )
 
-                            bg_prob = prob_map[:, :, cfg.background_idx].flatten()
+                            bg_prob = prob_map[:, :, cfg.inference.background_idx].flatten()
                             argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
-                            mask = bg_prob <= cfg.bg_threshold
+                            mask = bg_prob <= cfg.inference.bg_threshold
                             acc = (
                                 float(np.mean(argmax[mask] == true_idx))
                                 if mask.sum() > 0
@@ -222,7 +221,7 @@ def main(cfg: DictConfig):
 
                             log.info("  %s accuracy: %.4f", img_label, acc)
                             mlflow.log_metric(
-                                f"Timer/infer_min_{safe_label}", (time.time() - t0) / 60
+                                f"Timer/per_sample/infer_min_{safe_label}", (time.time() - t0) / 60
                             )
 
                         except Exception as e:
@@ -240,7 +239,7 @@ def main(cfg: DictConfig):
                         for cls, cls_accs in class_accs.items():
                             safe = cls.replace(" ", "_").replace("/", "_")
                             mlflow.log_metric(
-                                f"Inference/mean_acc_{safe}", float(np.mean(cls_accs))
+                                f"Inference/per_sample/mean_acc_{safe}", float(np.mean(cls_accs))
                             )
 
                         mlflow.log_metrics(
@@ -255,7 +254,7 @@ def main(cfg: DictConfig):
                         )
 
                 mlflow.log_metric("Timer/total_infer_min", (time.time() - t_infer_start) / 60)
-                mlflow.set_tag("pred_store_path", cfg.pred_store_path)
+                mlflow.set_tag("pred_store_path", cfg.inference.pred_store_path)
 
                 if failed:
                     mlflow.log_text("\n".join(failed), "failed_images.txt")

@@ -55,7 +55,7 @@ def run_inference(cfg, image_name, ckpt_path, batch_size=512):
     output_queue = mp.Queue()
 
     processes = []
-    for gpu_id in [0, 1]:
+    for gpu_id in cfg.inference.devices:
         p = mp.Process(
             target=inference_worker,
             args=(gpu_id, ckpt_path, input_queue, output_queue, zarr_path, image_name),
@@ -71,7 +71,7 @@ def run_inference(cfg, image_name, ckpt_path, batch_size=512):
         input_queue.put(None)
 
     num_batches = (num_pixels + batch_size - 1) // batch_size
-    prob_map = None  # shape: (num_pixels, n_classes), float16
+    prob_map = None
 
     for _ in range(num_batches):
         start_idx, probs = output_queue.get()  # probs: (batch, n_classes)

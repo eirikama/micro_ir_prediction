@@ -24,9 +24,9 @@ def run_training(cfg, model, datamodule, logger=None):
 
     trainer = pl.Trainer(
         max_epochs=cfg.trainer.max_epochs,
-        accelerator="gpu",
+        accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
-        precision="16-mixed",
+        precision=cfg.trainer.precision,
         callbacks=[checkpoint_callback, early_stop, ExtendedLogger()],
         limit_train_batches=datamodule.steps_per_epoch,
         limit_val_batches=datamodule.val_batches,

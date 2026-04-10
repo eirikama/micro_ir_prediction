@@ -1,0 +1,9 @@
+_target_: config_schema.InferenceConfig
+
+background_idx: 0
+bg_threshold: 0.5
+top_k_save: 3
+batch_size: 512
+devices: [0, 1]
+pred_store_path: "/app/outputs/predictions_raw.lmdb"
+ckpt_path: null
