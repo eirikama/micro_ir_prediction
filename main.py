@@ -23,6 +23,15 @@ from src.Engine.save_inference import open_pred_store, save_inference_outputs_za
 from src.Engine.trainer_engine import run_training
 from src.Models.aacnn import AACNN
 from src.utils.warnings import silence_warnings
+import subprocess
+
+def setup_git_safety():
+    try:
+        # This tells git to ignore the fact that the .git folder is owned by "someone else"
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/app"],
+                       check=True)
+    except Exception as e:
+        print(f"Warning: Could not set git safe directory: {e}")
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +43,7 @@ cs.store(group="trainer", name="trainer_config", node=TrainerConfig)
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
 def main(cfg: DictConfig):
+    setup_git_safety()
     silence_warnings()
     pl.seed_everything(cfg.seed)
 

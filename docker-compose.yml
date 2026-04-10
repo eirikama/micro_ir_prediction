@@ -19,6 +19,7 @@ services:
     volumes:
       - /mnt/ssd2:/mnt/ssd2:ro
       - /mnt/ssd3:/mnt/ssd3:ro
+      - ${PROJECT_DIR}/.git:/app/.git:ro
       - ${PROJECT_DIR}/outputs:/app/outputs
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints
