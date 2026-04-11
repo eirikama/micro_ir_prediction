@@ -1,16 +1,17 @@
 import random
-
+from typing import Iterator
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import zarr
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, IterableDataset
-
+from omegaconf import DictConfig
 from src.Data.aug_utils import add_co2, add_polynomial, add_scattering
 
 
-def create_experiment_split(zarr_path, split_ratio=0.5):
+def create_experiment_split(zarr_path: str, split_ratio: float = 0.5) -> dict[str, list]:
+
     store = zarr.open(zarr_path, mode="r")
     images_group = store["images"]
 
@@ -26,13 +27,14 @@ def create_experiment_split(zarr_path, split_ratio=0.5):
 
 
 def get_training_data(
-    split,
-    zarr_path="/mnt/ssd3/eirik/ProcessedData/microplastics_library.zarr",
-    N=8,
-    patch_size=128,
-    background_max=0.5,
-    sample_min=0.1
-):
+    split: dict[str, list],
+    zarr_path: str ="/mnt/ssd3/eirik/ProcessedData/microplastics_library.zarr",
+    spectra_per_class: int = 8,
+    patch_size: int = 128,
+    background_max: float = 0.5,
+    sample_min: float = 0.1
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
+
     root = zarr.open(zarr_path, mode="r")
     images_group = root["images"]
     wn = np.asarray(root.attrs["wavenumbers"], dtype=np.float32)
@@ -40,14 +42,14 @@ def get_training_data(
     unique_labels = sorted(list(set(item["label"] for item in split)))
     rng = np.random.default_rng()
 
-    spec_per_image = N // 8
+    spec_per_image = max(1, spectra_per_class // len(unique_labels))
     all_spectra, all_labels = [], []
     label_encoding = {"bkg": 0}
     for i, label in enumerate(unique_labels):
         names = [item["name"] for item in split if item["label"] == label]
 
         p_sample, p_bkg = [], []
-        while len(p_sample) < N:
+        while len(p_sample) < spectra_per_class:
             name = names[rng.integers(len(names))]
             z_arr = images_group[name]["data"]
 
@@ -75,20 +77,21 @@ def get_training_data(
                 chosen = rng.choice(len(valid), size=k, replace=False)
                 p_bkg.extend(valid[chosen])
 
-        N_bkg_per_plastic = int(len(p_sample) / 4)
+        N_bkg_per_class = int(len(p_sample) / (len(unique_labels)*2))
 
-        all_spectra.append(np.stack(p_sample[:N]))
-        all_spectra.append(np.stack(p_bkg[:N_bkg_per_plastic]))
+        all_spectra.append(np.stack(p_sample[:spectra_per_class]))
+        all_spectra.append(np.stack(p_bkg[:N_bkg_per_class]))
 
-        all_labels.append(np.ones(N) * (i + 1))
-        all_labels.append(np.zeros(N_bkg_per_plastic))
+        all_labels.append(np.ones(spectra_per_class) * (i + 1))
+        all_labels.append(np.zeros(N_bkg_per_class))
         label_encoding[label] = i + 1
 
     return np.hstack(all_labels), np.vstack(all_spectra), wn, label_encoding
 
 
 class SpectralDataset(IterableDataset):
-    def __init__(self, spectra, y, wn, cfg):
+    def __init__(self, spectra: np.ndarray, y: np.ndarray, wn: np.ndarray, cfg: DictConfig) -> None:
+
         self.spectra = spectra.cpu().numpy() if torch.is_tensor(spectra) else spectra
         self.y = y.cpu().numpy() if torch.is_tensor(y) else y
         self.wn = wn.cpu().numpy() if torch.is_tensor(wn) else wn
@@ -104,7 +107,7 @@ class SpectralDataset(IterableDataset):
         self.samples_per_class = self.cfg.batch_size // self.num_classes
         self.remainder = self.cfg.batch_size % self.num_classes
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
         while True:
             batch_idx = []
 
@@ -128,7 +131,7 @@ class SpectralDataset(IterableDataset):
 
             yield self._process_batch(batch_idx)
 
-    def _process_batch(self, idx):
+    def _process_batch(self, idx: np.ndarray) -> tuple[torch.Tensor, torch.Tensor]:
         s = self.spectra[idx].copy()
         y = self.y[idx]
         B = s.shape[0]
@@ -186,7 +189,7 @@ class SpectralDataset(IterableDataset):
 
 
 class SpectralDataModule(pl.LightningDataModule):
-    def __init__(self, split, cfg):
+    def __init__(self, split: list[dict[str, str]], cfg: DictConfig) -> None:
         super().__init__()
         self.cfg = cfg
         self.split = split
@@ -195,11 +198,11 @@ class SpectralDataModule(pl.LightningDataModule):
         self.val_ds = None
         self.steps_per_epoch = 0
 
-    def setup(self, stage=None):
+    def setup(self, stage: str | None = None) -> None:
         label, spectra, wn, label_encoding = get_training_data(
             self.split,
             self.cfg.zarr_path,
-            self.cfg.spectra_per_plastic * 2,
+            self.cfg.spectra_per_class * 2,
             patch_size=64,
             background_max=self.cfg.background_max,
             sample_min=self.cfg.sample_min
@@ -217,8 +220,8 @@ class SpectralDataModule(pl.LightningDataModule):
         self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.cfg)
         self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg)
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
         return DataLoader(self.train_ds, batch_size=None, pin_memory=True)
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
         return DataLoader(self.val_ds, batch_size=None, pin_memory=True)

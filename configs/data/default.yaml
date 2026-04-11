@@ -1,7 +1,5 @@
-_target_: config_schema.DataConfig
-
 zarr_path: "/mnt/ssd3/eirik/ProcessedData/microplastics_library.zarr"
-spectra_per_plastic: 64
+spectra_per_class: 64
 batch_size: 64
 train_split_size: 0.5
 val_split_size: 0.5

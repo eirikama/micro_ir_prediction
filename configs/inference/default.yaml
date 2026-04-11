@@ -1,5 +1,3 @@
-_target_: config_schema.InferenceConfig
-
 background_idx: 0
 bg_threshold: 0.5
 top_k_save: 3

@@ -1,4 +1,3 @@
-# configs/config.yaml
 defaults:
   - model: aacnn
   - data: default

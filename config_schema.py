@@ -38,7 +38,7 @@ class InferenceConfig:
 @dataclass
 class DataConfig:
     zarr_path: str = ""
-    spectra_per_plastic: int = 8
+    spectra_per_class: int = 8
     batch_size: int = 64
     train_split_size: float = 0.5
     val_split_size: float = 0.5

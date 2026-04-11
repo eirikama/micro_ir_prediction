@@ -1,5 +1,3 @@
-_target_: config_schema.ModelConfig
-
 conv_channels: 32
 kernel_size: 21
 pred_dropout: 0.2

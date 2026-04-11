@@ -4,27 +4,27 @@ from torch import nn
 
 
 class InputNorm(nn.Module):
-    def __init__(self, num_features):
+    def __init__(self, num_features: int) -> None:
         super().__init__()
         self.norm = nn.InstanceNorm1d(num_features, affine=True, eps=1e-5)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.norm(x)
 
 
 class AugmentedConv(nn.Module):
     def __init__(
         self,
-        in_channels,
-        out_channels,
-        kernel_size,
-        dk,
-        dv,
-        Nh,
-        padding=0,
-        shape=0,
-        stride=1,
-    ):
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        dk: int,
+        dv: int,
+        Nh: int,
+        padding: int = 0,
+        shape: int = 0,
+        stride: int = 1,
+    ) -> None:
         super().__init__()
 
         self.in_channels = in_channels
@@ -64,11 +64,11 @@ class AugmentedConv(nn.Module):
 
         self.attn_out = nn.Conv1d(self.dv, self.dv, kernel_size=1, stride=1)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         conv_out = self.conv_out(x)
         batch, _, width = conv_out.size()
 
-        flat_q, flat_k, flat_v, q, k, v = self.compute_flat_qkv(x, self.dk, self.dv, self.Nh)
+        flat_q, flat_k, flat_v = self.compute_flat_qkv(x, self.dk, self.dv, self.Nh)
 
         logits = torch.matmul(flat_q.transpose(2, 3), flat_k)
         weights = F.softmax(logits, dim=-1)
@@ -80,7 +80,10 @@ class AugmentedConv(nn.Module):
         attn_out = self.attn_out(attn_out)
         return torch.cat((conv_out, attn_out), dim=1)
 
-    def compute_flat_qkv(self, x, dk, dv, Nh):
+    def compute_flat_qkv(
+        self, x: torch.Tensor, dk: int, dv: int, Nh: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
         qkv = self.qkv_conv(x)
         N, _, W = qkv.size()
         q, k, v = torch.split(qkv, [dk, dk, dv], dim=1)
@@ -93,22 +96,25 @@ class AugmentedConv(nn.Module):
         flat_q = torch.reshape(q, (N, Nh, dk // Nh, W))
         flat_k = torch.reshape(k, (N, Nh, dk // Nh, W))
         flat_v = torch.reshape(v, (N, Nh, dv // Nh, W))
-        return flat_q, flat_k, flat_v, q, k, v
 
-    def split_heads_1d(self, x, Nh):
+        return flat_q, flat_k, flat_v
+
+    def split_heads_1d(self, x: torch.Tensor, Nh: int) -> torch.Tensor:
         batch, channels, width = x.size()
         ret_shape = (batch, Nh, channels // Nh, width)
         split = torch.reshape(x, ret_shape)
         return split
 
-    def combine_heads_1d(self, x):
+    def combine_heads_1d(self, x: torch.Tensor) -> torch.Tensor:
         batch, Nh, dv, W = x.size()
         ret_shape = (batch, Nh * dv, W)
         return torch.reshape(x, ret_shape)
 
 
 class SpectralBlock(nn.Module):
-    def __init__(self, in_ch, out_ch, kernel_size, dk=16, dv=8, Nh=4):
+    def __init__(
+        self, in_ch: int, out_ch: int, kernel_size: int, dk: int = 16, dv: int = 8, Nh: int = 4
+    ) -> None:
         super().__init__()
         self.conv = AugmentedConv(in_ch, out_ch, kernel_size, dk=dk, dv=dv, Nh=Nh)
         self.bn = nn.BatchNorm1d(out_ch)
@@ -116,5 +122,5 @@ class SpectralBlock(nn.Module):
         # 1x1 conv to match dimensions for the residual add
         self.shortcut = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.leaky(self.bn(self.conv(x)) + self.shortcut(x))

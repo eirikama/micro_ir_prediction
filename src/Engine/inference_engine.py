@@ -1,15 +1,23 @@
 import gc
-
 import numpy as np
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 import zarr
+from omegaconf import DictConfig
 
 from src.Models.aacnn import AACNN
 
 
-def inference_worker(gpu_id, ckpt_path, input_queue, output_queue, zarr_path, image_name):
+def inference_worker(
+    gpu_id: int,
+    ckpt_path: str,
+    input_queue: mp.Queue,
+    output_queue: mp.Queue,
+    zarr_path: str,
+    image_name: str,
+) -> None:
+
     device = torch.device(f"cuda:{gpu_id}")
 
     model = AACNN.load_from_checkpoint(ckpt_path, weights_only=False).to(device).half()
@@ -45,7 +53,8 @@ def inference_worker(gpu_id, ckpt_path, input_queue, output_queue, zarr_path, im
             del data, chunk
 
 
-def run_inference(cfg, image_name, ckpt_path, batch_size=512):
+def run_inference(cfg: DictConfig, image_name: str, ckpt_path: str, batch_size: int = 512) -> np.ndarray:
+
     zarr_path = cfg.data.zarr_path
     store = zarr.open(zarr_path, mode="r")
     H, W, Bands = store[f"images/{image_name}/data"].shape

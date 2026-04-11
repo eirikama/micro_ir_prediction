@@ -25,7 +25,7 @@ from src.Models.aacnn import AACNN
 from src.utils.warnings import silence_warnings
 import subprocess
 
-def setup_git_safety():
+def setup_git_safety() -> None:
     try:
         # This tells git to ignore the fact that the .git folder is owned by "someone else"
         subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/app"],
@@ -43,7 +43,7 @@ cs.store(group="inference", name="inference_config", node=InferenceConfig)
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
-def main(cfg: DictConfig):
+def main(cfg: DictConfig) -> None:
     setup_git_safety()
     silence_warnings()
     pl.seed_everything(cfg.seed)
@@ -55,7 +55,7 @@ def main(cfg: DictConfig):
     datamodule.setup()
     label_encoding = datamodule.label_encoding
 
-    run_name = f"N{cfg.data.spectra_per_plastic}_seed{cfg.seed}"
+    run_name = f"N{cfg.data.spectra_per_class}_seed{cfg.seed}"
 
     repo_path = hydra.utils.get_original_cwd()
     try:
@@ -97,7 +97,7 @@ def main(cfg: DictConfig):
                     "mlflow_id": run.info.run_id,
                     "mlflow_name": run_name,
                     "mode": cfg.mode,
-                    "spectra_per_plastic": cfg.data.spectra_per_plastic,
+                    "spectra_per_class": cfg.data.spectra_per_class,
                     "user": getpass.getuser(),
                     "python_version": platform.python_version(),
                     "torch_version": torch.__version__,
@@ -195,7 +195,7 @@ def main(cfg: DictConfig):
                                 prob_map=prob_map,
                                 image_name=img_name,
                                 store=pred_store,
-                                N=cfg.data.spectra_per_plastic,
+                                N=cfg.data.spectra_per_class,
                                 seed=cfg.seed,
                                 background_idx=cfg.inference.background_idx,
                                 top_k_save=cfg.inference.top_k_save,
@@ -221,7 +221,7 @@ def main(cfg: DictConfig):
 
                             log.info("  %s accuracy: %.4f", img_label, acc)
                             mlflow.log_metric(
-                                f"Timer/per_sample/infer_min_{safe_label}", (time.time() - t0) / 60
+                                f"Timer/per_class/infer_min_{safe_label}", (time.time() - t0) / 60
                             )
 
                         except Exception as e:
@@ -239,7 +239,7 @@ def main(cfg: DictConfig):
                         for cls, cls_accs in class_accs.items():
                             safe = cls.replace(" ", "_").replace("/", "_")
                             mlflow.log_metric(
-                                f"Inference/per_sample/mean_acc_{safe}", float(np.mean(cls_accs))
+                                f"Inference/per_class/mean_acc_{safe}", float(np.mean(cls_accs))
                             )
 
                         mlflow.log_metrics(
