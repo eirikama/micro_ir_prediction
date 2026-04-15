@@ -15,23 +15,17 @@ import torch.multiprocessing as mp
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning.loggers import MLFlowLogger
-
-from config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
-from src.Data.data_utils import SpectralDataModule, create_experiment_split
-from src.Engine.inference_engine import run_inference
-from src.Engine.save_inference import open_pred_store, save_inference_outputs_zarr
-from src.Engine.trainer_engine import run_training
-from src.Models.aacnn import AACNN
-from src.utils.warnings import silence_warnings
 import subprocess
 
-def setup_git_safety() -> None:
-    try:
-        # This tells git to ignore the fact that the .git folder is owned by "someone else"
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/app"],
-                       check=True)
-    except Exception as e:
-        print(f"Warning: Could not set git safe directory: {e}")
+from src.configs.config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
+from src.data.datamodule import SpectralDataModule
+from src.data.sampling import create_experiment_split
+from src.inference.inference_engine import run_inference
+from src.inference.export_inference import open_pred_store, save_inference_outputs_zarr
+from src.training.trainer_engine import run_training
+from src.models.aacnn import AACNN
+from src.utils import silence_warnings, setup_git
+
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +38,7 @@ cs.store(group="inference", name="inference_config", node=InferenceConfig)
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
 def main(cfg: DictConfig) -> None:
-    setup_git_safety()
+    setup_git()
     silence_warnings()
     pl.seed_everything(cfg.seed)
 

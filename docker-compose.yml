@@ -24,12 +24,13 @@ services:
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints
       - ${PROJECT_DIR}/main.py:/app/main.py
-      - ${PROJECT_DIR}/config_schema.py:/app/config_schema.py
       - ${PROJECT_DIR}/configs:/app/configs
-      - ${PROJECT_DIR}/src/Data:/app/src/Data
-      - ${PROJECT_DIR}/src/Engine:/app/src/Engine
-      - ${PROJECT_DIR}/src/Models:/app/src/Models
-      - ${PROJECT_DIR}/src/utils:/app/src/utils
+      - ${PROJECT_DIR}/src/configs:/app/src/configs
+      - ${PROJECT_DIR}/src/data:/app/src/data
+      - ${PROJECT_DIR}/src/training:/app/src/training
+      - ${PROJECT_DIR}/src/inference:/app/src/inference
+      - ${PROJECT_DIR}/src/models:/app/src/models
+      - ${PROJECT_DIR}/src/utils.py:/app/src/utils.py
     command: >
       python main.py
       mode=all
@@ -69,15 +70,19 @@ services:
     volumes:
       - /mnt/ssd2:/mnt/ssd2:ro
       - /mnt/ssd3:/mnt/ssd3:ro
+      - ${PROJECT_DIR}/.git:/app/.git:ro
       - ${PROJECT_DIR}/outputs:/app/outputs
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints
-      - ${PROJECT_DIR}/src/Data:/app/src/Data
-      - ${PROJECT_DIR}/src/Engine:/app/src/Engine
-      - ${PROJECT_DIR}/src/Models:/app/src/Models
-      - ${PROJECT_DIR}/src/utils:/app/src/utils
+      - ${PROJECT_DIR}/main.py:/app/main.py
       - ${PROJECT_DIR}/configs:/app/configs
-      - ${PROJECT_DIR}/notebooks:/app/notebooks
+      - ${PROJECT_DIR}/src/configs:/app/src/configs
+      - ${PROJECT_DIR}/src/data:/app/src/data
+      - ${PROJECT_DIR}/src/training:/app/src/training
+      - ${PROJECT_DIR}/src/inference:/app/src/inference
+      - ${PROJECT_DIR}/src/models:/app/src/models
+      - ${PROJECT_DIR}/src/utils.py:/app/src/utils.py
+
     command: >
       jupyter lab
       --ip=0.0.0.0

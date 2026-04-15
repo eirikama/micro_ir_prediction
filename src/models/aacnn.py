@@ -4,8 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchmetrics
 from omegaconf import DictConfig
-from src.Models.loss import FocalLoss
-from src.Models.blocks import AugmentedConv, InputNorm
+
+from src.models.loss import FocalLoss
+from src.models.blocks import AugmentedConv, InputNorm
 
 
 class AACNN(pl.LightningModule):

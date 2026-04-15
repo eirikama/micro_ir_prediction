@@ -1,6 +1,6 @@
 import logging
 import warnings
-
+import subprocess
 
 def silence_warnings():
     warnings.filterwarnings("ignore", ".*tensorboardX.*")
@@ -14,3 +14,11 @@ def silence_warnings():
     )
 
     logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
+
+def setup_git() -> None:
+    try:
+        # This tells git to ignore the fact that the .git folder is owned by "someone else"
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/app"],
+                       check=True)
+    except Exception as e:
+        print(f"Warning: Could not set git safe directory: {e}")

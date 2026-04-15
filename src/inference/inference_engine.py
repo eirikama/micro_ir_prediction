@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import zarr
 from omegaconf import DictConfig
 
-from src.Models.aacnn import AACNN
+from src.models.aacnn import AACNN
 
 
 def inference_worker(

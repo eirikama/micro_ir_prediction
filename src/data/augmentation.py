@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import hilbert
 
-from src.Physics.mie import q_ext_sca_na
+from src.physics.mie import q_ext_sca_na
 
 
 def get_imagpart(pure_absorbance, wavelength, radius, factor=1):

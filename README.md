@@ -1,4 +1,4 @@
-# microplastics-predict
+# Hyperspectral Predictions
 
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
 ![Lightning](https://img.shields.io/badge/Lightning-2.x-792EE5?logo=lightning&logoColor=white)
@@ -36,9 +36,7 @@ microscopy_prediction/
 ├── pyproject.toml
 ├── requirements.txt
 ├── README.md
-├── run.sh                            # convenience script for docker run
 ├── main.py                           # entry point
-├── config_schema.py                  # typed dataclass config definitions
 │
 ├── configs/
 │   ├── config.yaml                   # root config
@@ -50,25 +48,31 @@ microscopy_prediction/
 │       └── default.yaml              # PyTorch Lightning trainer config
 │
 ├── src/
-│   ├── Models/
+│   ├── configs/
+│   │   └── config_schema.py          # typed dataclass config definitions
+│   ├── data/
+│   │   ├── augmentation.py           # spectral augmentation
+│   │   ├── datamodule.py             # SpectralDataModule, experiment split
+│   │   └── sampling.py               # data sampling utilities
+│   ├── models/
 │   │   ├── aacnn.py                  # AACNN LightningModule
-│   │   └── blocks.py                 # attention-augmented conv blocks
-│   ├── Data/
-│   │   ├── data_utils.py             # SpectralDataModule, experiment split
-│   │   └── aug_utils.py              # spectral augmentation
-│   ├── Engine/
-│   │   ├── trainer_engine.py         # training loop
+│   │   ├── blocks.py                 # attention-augmented conv blocks
+│   │   └── loss.py                   # FocalLoss
+│   ├── training/
+│   │   ├── callbacks.py              # custom Lightning callbacks
+│   │   └── trainer_engine.py         # training loop
+│   ├── inference/
 │   │   ├── inference_engine.py       # multi-GPU inference workers
-│   │   └── save_inference.py         # Zarr/LMDB output saving
-│   └── Physics/
-│       ├── mie.pyx                    # Cython Mie scattering implementation
-│       └── setup_mie.py               # Cython build script
+│   │   └── export_inference.py       # Zarr/LMDB output saving
+│   ├── physics/
+│   │   ├── mie.pyx                   # Cython Mie scattering implementation
+│   │   └── setup_mie.py              # Cython build script
+│   └── utils.py                      # shared utilities
 │
-├── notebooks/                         # Jupyter notebooks for analysis
-|     └── visualize_results.ipynb
-├── docker/
-     └── sqlite-autoconf-3450200.tar.gz   # bundled for offline Docker build
-
+├── notebooks/
+│   └── visualize_results.ipynb
+└── docker/
+    └── sqlite-autoconf-3450200.tar.gz   # bundled for offline Docker build
 ```
 
 ---
@@ -91,7 +95,21 @@ Image dimensions are typically powers of 2 (`2^k × 2^l`). Bands is the number o
 
 ## Installation
 
-### Without Docker (local development)
+### Docker (recommended)
+
+```bash
+# copy the sqlite tarball for offline build (only needed once)
+mkdir -p docker
+wget https://www.sqlite.org/2024/sqlite-autoconf-3450200.tar.gz -P docker/
+
+# set your project directory
+echo 'PROJECT_DIR=/path/to/microscopy_prediction' > .env
+
+# build image
+docker compose build
+```
+
+### Local development (without Docker)
 
 ```bash
 git clone https://github.com/yourname/microplastics-predict.git
@@ -102,25 +120,7 @@ source env/bin/activate
 pip install -r requirements.txt
 
 # build Cython Mie scattering extension
-cd src/Physics && python setup_mie.py build_ext --inplace && cd ../..
-```
-
-### With Docker (recommended)
-
-```bash
-# download sqlite tarball for offline build
-mkdir -p docker
-wget https://www.sqlite.org/2024/sqlite-autoconf-3450200.tar.gz -P docker/
-
-# build image
-docker build -t microplastics-predict .
-
-# verify GPU access
-docker run --gpus all microplastics-predict python -c "
-import torch
-print('CUDA:', torch.cuda.is_available())
-print('GPUs:', torch.cuda.device_count())
-"
+cd src/physics && python setup_mie.py build_ext --inplace && cd ../..
 ```
 
 ---
@@ -136,7 +136,7 @@ All parameters are controlled via Hydra config files. Key parameters:
 | `data.spectra_per_plastic` | `data/default.yaml` | training samples per class |
 | `data.batch_size` | `data/default.yaml` | batch size |
 | `trainer.max_epochs` | `trainer/default.yaml` | maximum training epochs |
-| `trainer.early_stopping_patience` | `trainer/default.yaml` | early stopping patience |
+| `trainer.early_stopping_patience` | `trainer/default.yaml` | early stopping patience (in epochs) |
 | `bg_threshold` | `config.yaml` | background probability threshold for inference filtering |
 | `pred_store_path` | `config.yaml` | path to LMDB prediction store |
 | `mlflow.tracking_uri` | `config.yaml` | MLflow database URI |
@@ -145,39 +145,52 @@ All parameters are controlled via Hydra config files. Key parameters:
 
 ## Running
 
-### Using run.sh (recommended)
+All services are run via Docker Compose. Set `PROJECT_DIR` in `.env` before starting.
+
+### Training
 
 ```bash
-chmod +x run.sh
-
-# single run
-./run.sh mode=all data.spectra_per_plastic=64 seed=0 trainer.max_epochs=50
-
-# hyperparameter sweep — 5 values of N × 5 seeds = 25 jobs
-./run.sh --multirun \
-    data.spectra_per_plastic=8,16,32,64,128 \
-    seed="range(0,5)" \
-    mode=all \
-    trainer.max_epochs=50
-
-# inference only with existing checkpoint
-./run.sh mode=infer ckpt_path=/app/checkpoints/best-epoch=42-val_acc=0.8500.ckpt
+docker compose run --rm train
 ```
 
-### Using docker compose
+To override config parameters:
 
 ```bash
-# set project directory
-echo 'PROJECT_DIR=/path/to/microscopy_prediction' > .env
+docker compose run --rm train python main.py \
+    mode=all \
+    data.spectra_per_plastic=128 \
+    seed=1
+```
 
-# training
-docker compose up train
+To run a hyperparameter sweep (Hydra multirun):
 
-# MLflow UI — access at http://localhost:5000 via SSH tunnel
+```bash
+docker compose run --rm train python main.py --multirun \
+    data.spectra_per_plastic=8,16,32,64,128 \
+    seed="range(0,5)" \
+    mode=all
+```
+
+### Inference only
+
+```bash
+docker compose run --rm train python main.py \
+    mode=infer \
+    ckpt_path=/app/checkpoints/best-epoch=42-val_acc=0.8500.ckpt
+```
+
+### MLflow UI
+
+```bash
 docker compose up mlflow-ui -d
+# access at http://localhost:5000 (or via SSH tunnel — see below)
+```
 
-# Jupyter notebook — access at http://localhost:8888 via SSH tunnel
+### Jupyter
+
+```bash
 docker compose up jupyter -d
+# access at http://localhost:8888 (or via SSH tunnel — see below)
 ```
 
 ### SSH port forwarding (PuTTY)
@@ -190,27 +203,6 @@ Connection → SSH → Tunnels
 
 ---
 
-## Experiment tracking
-
-All runs are tracked with MLflow. Each run logs:
-
-- hyperparameters — N, seed, lr, batch size, epochs, bg_threshold
-- per-epoch train/val loss and accuracy via Lightning MLFlowLogger
-- best val accuracy, final epoch, whether early stopping fired
-- per-image inference accuracy and timing
-- per-class mean accuracy
-- GPU info, hostname, torch version
-- full Hydra config as a YAML artifact
-- label encoding as a JSON artifact
-
-Start the UI:
-
-```bash
-docker compose up mlflow-ui -d
-# open http://localhost:5000
-```
-
----
 
 ## Inference outputs
 
@@ -270,14 +262,13 @@ print(df.groupby(["N", "threshold"])["accuracy"].agg(["mean", "std"]).round(4))
 The Mie scattering physics module must be compiled before use:
 
 ```bash
-cd src/Physics
+cd src/physics
 python setup_mie.py build_ext --inplace
 ```
 
 Inside Docker this runs automatically during `docker build`.
 
 ---
-
 
 ## License
 
