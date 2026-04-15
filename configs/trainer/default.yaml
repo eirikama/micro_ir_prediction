@@ -1,6 +1,6 @@
 max_epochs: 50000
-early_stopping_patience: 400
-val_every_n_epochs: 2
+early_stopping_patience: 500
+val_every_n_epochs: 1
 log_every_n_epochs: 10
 precision: "16-mixed"
 accelerator: "gpu"

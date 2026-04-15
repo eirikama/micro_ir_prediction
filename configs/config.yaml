@@ -7,7 +7,7 @@ defaults:
 
 mlflow:
   tracking_uri:    "sqlite:////app/mlflow.db"
-  experiment_name: "microplastics_raw"
+  experiment_name: "microplastics_noise_augmentation"
 
 mode: all
 seed: 42

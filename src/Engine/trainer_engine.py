@@ -37,7 +37,7 @@ def run_training(
         precision=cfg.trainer.precision,
         callbacks=[checkpoint_callback, early_stop, ExtendedLogger()],
         limit_train_batches=datamodule.steps_per_epoch,
-        limit_val_batches=datamodule.val_batches,
+        limit_val_batches=10,                            #datamodule.val_batches,
         log_every_n_steps=datamodule.steps_per_epoch,
         check_val_every_n_epoch=cfg.trainer.val_every_n_epochs,
         enable_progress_bar=False,

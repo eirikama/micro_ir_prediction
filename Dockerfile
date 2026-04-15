@@ -51,8 +51,10 @@ RUN uv pip install --system --no-cache \
     --index-strategy unsafe-best-match \
     -r requirements.txt
 
+COPY src/Physics /app/src/Physics
+RUN cd /app/src/Physics && python setup_mie.py build_ext --inplace
+
 COPY . .
 
-RUN cd src/Physics && python setup_mie.py build_ext --inplace
 
 CMD ["python", "main.py"]
