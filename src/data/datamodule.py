@@ -87,6 +87,7 @@ class SpectralDataset(IterableDataset):
         for mask, ranges in zip(
             [poly_mask, bkg_mask],
             [self.cfg.param_ranges, self.cfg.bkg_param_ranges],
+            strict=True
         ):
             if mask.any():
                 n_samples = np.sum(mask)
@@ -122,13 +123,18 @@ class SpectralDataModule(pl.LightningDataModule):
         self.steps_per_epoch = 0
 
     def setup(self, stage: str | None = None) -> None:
+
+        bkg_per_class = self.cfg.spectra_per_class // self.cfg.sample_to_bkg_spectra_ratio
         label, spectra, wn, label_encoding = get_training_data(
-            self.split,
-            self.cfg.zarr_path,
-            self.cfg.spectra_per_class * 2,
-            patch_size=64,
+            split=self.split,
+            zarr_path=self.cfg.zarr_path,
+            spectra_per_class=self.cfg.spectra_per_class * 2,
+            bkg_per_class=bkg_per_class * 2,
+            patch_size=self.cfg.sampling_patch_size,
             background_max=self.cfg.background_max,
-            sample_min=self.cfg.sample_min
+            sample_min=self.cfg.sample_min,
+            max_class_attempts=self.cfg.max_sampling_per_class_attempts
+
         )
         self.wn = wn
         self.label_encoding = label_encoding

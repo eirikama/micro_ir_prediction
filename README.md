@@ -1,4 +1,4 @@
-# Hyperspectral Predictions
+# Inrefred Hyperspectral Prediction
 
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
 ![Lightning](https://img.shields.io/badge/Lightning-2.x-792EE5?logo=lightning&logoColor=white)

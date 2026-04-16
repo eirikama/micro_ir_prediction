@@ -1,6 +1,7 @@
 import logging
-import warnings
 import subprocess
+import warnings
+
 
 def silence_warnings():
     warnings.filterwarnings("ignore", ".*tensorboardX.*")

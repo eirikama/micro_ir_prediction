@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+
 @dataclass
 class ModelConfig:
     conv_channels: int = 64
@@ -39,6 +40,9 @@ class InferenceConfig:
 class DataConfig:
     zarr_path: str = ""
     spectra_per_class: int = 8
+    sample_to_bkg_spectra_ratio: int = 2
+    max_sampling_per_class_attempts: int = 1000
+    sampling_patch_size: int = 64
     batch_size: int = 64
     train_split_size: float = 0.5
     val_split_size: float = 0.5

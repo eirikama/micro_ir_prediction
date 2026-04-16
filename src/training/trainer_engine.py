@@ -1,10 +1,10 @@
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from omegaconf import DictConfig
-from src.training.callbacks import ExtendedLogger
-from src.data.datamodule import SpectralDataModule
-from src.models.aacnn import AACNN
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import Logger
+
+from src.training.callbacks import ExtendedLogger
+
 
 def run_training(
     cfg: DictConfig,
