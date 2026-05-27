@@ -87,6 +87,7 @@ def save_inference_outputs_zarr(
         compressor=compressor,
     )
 
+    top_k_save = min(top_k_save, n_classes)
     flat = prob_map.reshape(-1, n_classes).astype(np.float32)
     top_k_idx = np.argsort(flat, axis=-1)[:, -top_k_save:][:, ::-1]
     top_k_prob = flat[np.arange(flat.shape[0])[:, None], top_k_idx]

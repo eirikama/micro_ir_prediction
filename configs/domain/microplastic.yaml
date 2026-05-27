@@ -1,0 +1,8 @@
+defaults:
+  - /domain/microplastic/data: default
+  - /domain/microplastic/model: aacnn
+  - /domain/microplastic/trainer: default
+  - /domain/microplastic/inference: default
+
+mlflow:
+  experiment_name: "microplastics_full_augmentation"

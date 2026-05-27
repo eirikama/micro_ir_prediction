@@ -1,0 +1,8 @@
+defaults:
+  - /domain/textile/data: default
+  - /domain/textile/model: aacnn
+  - /domain/textile/trainer: default
+  - /domain/textile/inference: default
+
+mlflow:
+  experiment_name: "microplastics_binary_textile_full_augmentation"

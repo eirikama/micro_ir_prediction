@@ -1,5 +1,6 @@
 max_epochs: 50000
-early_stopping_patience: 500
+min_epochs: 10
+early_stopping_patience: 200
 val_every_n_epochs: 1
 log_every_n_epochs: 10
 precision: "16-mixed"

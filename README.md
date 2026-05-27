@@ -29,6 +29,8 @@ Hyperspectral FTIR microscopy produces images where each pixel contains a full i
 microscopy_prediction/
 ├── Dockerfile
 ├── docker-compose.yml
+|── docker/
+|   └── sqlite-autoconf-3450200.tar.gz   # bundled for offline Docker build
 ├── .env                           # PROJECT_DIR path (not committed)
 ├── .dockerignore
 ├── .gitignore
@@ -69,10 +71,10 @@ microscopy_prediction/
 │   │   └── setup_mie.py              # Cython build script
 │   └── utils.py                      # shared utilities
 │
-├── notebooks/
-│   └── visualize_results.ipynb
-└── docker/
-    └── sqlite-autoconf-3450200.tar.gz   # bundled for offline Docker build
+└── notebooks/
+    ├── visualize_results.ipynb
+    └── explore_data.ipynb
+
 ```
 
 ---
@@ -166,7 +168,7 @@ To run a hyperparameter sweep (Hydra multirun):
 
 ```bash
 docker compose run --rm train python main.py --multirun \
-    data.spectra_per_plastic=8,16,32,64,128 \
+    data.spectra_per_class=8,16,32,64,128 \
     seed="range(0,5)" \
     mode=all
 ```

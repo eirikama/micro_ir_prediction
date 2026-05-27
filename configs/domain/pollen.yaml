@@ -1,0 +1,8 @@
+defaults:
+  - /domain/pollen/data: default
+  - /domain/pollen/model: aacnn
+  - /domain/pollen/trainer: default
+  - /domain/pollen/inference: default
+
+mlflow:
+  experiment_name: "microplastics_pollen_raw"

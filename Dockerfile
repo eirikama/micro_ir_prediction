@@ -51,8 +51,11 @@ RUN uv pip install --system --no-cache \
     --index-strategy unsafe-best-match \
     -r requirements.txt
 
-COPY src/physics /app/src/physics
-RUN cd /app/src/physics && python setup_mie.py build_ext --inplace
+COPY src/physics/sphere /app/src/physics/sphere
+RUN cd /app/src/physics/sphere && python setup_sphere_mie.py build_ext --inplace
+
+COPY src/physics/cylinder /app/src/physics/cylinder
+RUN cd /app/src/physics/cylinder && python setup_bessel.py build_ext --inplace
 
 COPY . .
 

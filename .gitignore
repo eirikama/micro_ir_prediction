@@ -9,9 +9,10 @@ __pycache__/
 
 # cython
 src/Physics/build/
-src/Physics/*.so
-src/Physics/*.cpp
-src/Physics/*.c
+src/physics/*.so
+src/physics/*.o
+src/physics/*.cpp
+src/physics/*.c
 
 # ruff
 .ruff_cache
@@ -38,7 +39,3 @@ mlflow.db
 mlflow.db-shm
 mlflow.db-wal
 mlruns/
-
-src/Physics/*.so
-src/Physics/*.c
-src/Physics/build/

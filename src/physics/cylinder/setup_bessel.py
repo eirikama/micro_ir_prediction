@@ -7,10 +7,10 @@ from setuptools import Extension, setup
 os.environ["CC"] = "gcc"
 
 ext = Extension(
-    name="mie",
-    sources=["mie.pyx"],
+    name="bessel",
+    sources=["bessel.pyx"],
     include_dirs=[np.get_include()],
-    extra_compile_args=["-O3", "-march=native", "-ffast-math", "-fopenmp", "-funroll-loops"],
+    extra_compile_args=["-O3", "-march=native", "-fopenmp", "-funroll-loops"],
     extra_link_args=["-fopenmp"],
     libraries=["m"],
     language="c++",
@@ -18,7 +18,7 @@ ext = Extension(
 )
 
 setup(
-    name="mie",
+    name="bessel",
     ext_modules=cythonize(
         ext,
         language_level=3,

@@ -18,6 +18,7 @@ class ModelConfig:
 class TrainerConfig:
     Nruns: int = 10
     max_epochs: int = 500
+    min_epochs: int = 5
     early_stopping_patience: int = 500
     val_every_n_epochs: int = 5
     log_every_n_epochs: int = 5
@@ -46,8 +47,9 @@ class DataConfig:
     batch_size: int = 64
     train_split_size: float = 0.5
     val_split_size: float = 0.5
-    samples_min: float = 0.5
+    sample_min: float = 0.5
     background_max: float = 0.1
+    include_bkg_pixels: bool = True
 
     mie_ratio: float = 0.0
     poly_ratio: float = 0.6

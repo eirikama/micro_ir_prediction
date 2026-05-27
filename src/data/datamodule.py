@@ -8,7 +8,18 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, IterableDataset
 from omegaconf import DictConfig
 
-from src.data.augmentation import add_co2, add_polynomial, add_scattering
+import numpy as np
+# Restore removed aliases for legacy Cython extensions (removed in NumPy 1.24)
+for _alias, _target in [
+    ("complex", np.complex128),
+    ("float",   np.float64),
+    ("int",     np.int_),
+    ("bool",    np.bool_),
+]:
+    if not hasattr(np, _alias):
+        setattr(np, _alias, _target)
+
+from src.data.augmentation import add_co2, add_polynomial, add_scattering #, add_cylindrical_scattering
 from src.data.sampling import create_experiment_split, get_training_data
 
 
@@ -59,6 +70,7 @@ class SpectralDataset(IterableDataset):
         y = self.y[idx]
         B = s.shape[0]
         is_signal = y != 0
+        # is_signal = y < 10
 
         # --- Mie Augmentation ---
         mie_mask = is_signal & (np.random.rand(B) < self.cfg.mie_ratio)
@@ -78,7 +90,10 @@ class SpectralDataset(IterableDataset):
                 ]
             )
             theta = np.random.uniform(self.cfg.theta_min, self.cfg.theta_max)
-            s[mie_mask] = add_scattering(s_subset, self.wn, rs, n0s, n_ims, theta, hs, scs)
+            if True:
+                s[mie_mask] = add_scattering(s_subset, self.wn, rs, n0s, n_ims, theta, hs, scs)
+            else:
+                s[mie_mask] = add_cylindrical_scattering(s_subset, self.wn, rs, n0s, n_ims, theta, hs, scs)
 
         # --- Vectorized Polynomials ---
         poly_mask = is_signal & (np.random.rand(B) < self.cfg.poly_ratio)
@@ -133,8 +148,8 @@ class SpectralDataModule(pl.LightningDataModule):
             patch_size=self.cfg.sampling_patch_size,
             background_max=self.cfg.background_max,
             sample_min=self.cfg.sample_min,
-            max_class_attempts=self.cfg.max_sampling_per_class_attempts
-
+            max_class_attempts=self.cfg.max_sampling_per_class_attempts,
+            include_bkg_pixels=self.cfg.include_bkg_pixels
         )
         self.wn = wn
         self.label_encoding = label_encoding

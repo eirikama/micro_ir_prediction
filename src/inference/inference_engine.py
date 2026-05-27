@@ -10,6 +10,49 @@ from omegaconf import DictConfig
 from src.models.aacnn import AACNN
 
 
+# def inference_worker(
+#     gpu_id: int,
+#     ckpt_path: str,
+#     input_queue: mp.Queue,
+#     output_queue: mp.Queue,
+#     zarr_path: str,
+#     image_name: str,
+# ) -> None:
+
+#     device = torch.device(f"cuda:{gpu_id}")
+
+#     model = AACNN.load_from_checkpoint(ckpt_path, weights_only=False).to(device).half()
+#     model.eval()
+
+#     store = zarr.open(zarr_path, mode="r")
+#     z_arr = store[f"images/{image_name}/data"]
+#     flat_data_ram = z_arr[:].reshape(-1, z_arr.shape[2])
+
+#     del z_arr
+#     gc.collect()
+
+#     with torch.inference_mode():
+#         while True:
+#             msg = input_queue.get()
+#             if msg is None:
+#                 break
+
+#             start, end = msg
+#             data = flat_data_ram[start:end]
+
+#             chunk = (
+#                 torch.from_numpy(data.astype(np.float32))
+#                 .unsqueeze(1)
+#                 .to(device, non_blocking=True)
+#                 .half()
+#             )
+#             logits = model(chunk)
+#             probs = F.softmax(logits, dim=1)
+
+#             output_queue.put((start, probs.cpu().numpy()))
+
+#             del data, chunk
+
 def inference_worker(
     gpu_id: int,
     ckpt_path: str,
@@ -18,46 +61,55 @@ def inference_worker(
     zarr_path: str,
     image_name: str,
 ) -> None:
+    try:
+        device = torch.device(f"cuda:{gpu_id}")
+        model = AACNN.load_from_checkpoint(ckpt_path, weights_only=False).to(device).half()
+        model.eval()
+        store = zarr.open(zarr_path, mode="r")
+        z_arr = store[f"images/{image_name}/data"]
 
-    device = torch.device(f"cuda:{gpu_id}")
+        flat_data_ram = z_arr[:].reshape(-1, z_arr.shape[2])
+        del z_arr
+        gc.collect()
 
-    model = AACNN.load_from_checkpoint(ckpt_path, weights_only=False).to(device).half()
-    model.eval()
+        with torch.inference_mode():
+            while True:
+                msg = input_queue.get()
+                if msg is None:
+                    break
+                start, end = msg
+                data = flat_data_ram[start:end]
+                chunk = (
+                    torch.from_numpy(data.astype(np.float32))
+                    .unsqueeze(1)
+                    .to(device, non_blocking=True)
+                    .half()
+                )
+                logits = model(chunk)
 
-    store = zarr.open(zarr_path, mode="r")
-    z_arr = store[f"images/{image_name}/data"]
-    flat_data_ram = z_arr[:].reshape(-1, z_arr.shape[2])
+                probs = F.softmax(logits, dim=1)
+                output_queue.put((start, probs.cpu().numpy()))
+                del data, chunk
 
-    del z_arr
-    gc.collect()
-
-    with torch.inference_mode():
+    except Exception as e:
+        import traceback
+        print(f"[worker gpu={gpu_id}] CRASHED: {e}", flush=True)
+        traceback.print_exc()
+        # Drain input queue so main process doesn't hang
         while True:
             msg = input_queue.get()
             if msg is None:
                 break
+        # Signal failure to main process with sentinel
+        output_queue.put((-1, None))
 
-            start, end = msg
-            data = flat_data_ram[start:end]
-
-            chunk = (
-                torch.from_numpy(data.astype(np.float32))
-                .unsqueeze(1)
-                .to(device, non_blocking=True)
-                .half()
-            )
-            logits = model(chunk)
-            probs = F.softmax(logits, dim=1)
-
-            output_queue.put((start, probs.cpu().numpy()))
-
-            del data, chunk
 
 
 def run_inference(cfg: DictConfig, image_name: str, ckpt_path: str, batch_size: int = 512) -> np.ndarray:
 
     zarr_path = cfg.data.zarr_path
     store = zarr.open(zarr_path, mode="r")
+
     H, W, Bands = store[f"images/{image_name}/data"].shape
     num_pixels = H * W
 
@@ -86,9 +138,13 @@ def run_inference(cfg: DictConfig, image_name: str, ckpt_path: str, batch_size: 
     for _ in range(num_batches):
         start_idx, probs = output_queue.get()  # probs: (batch, n_classes)
 
+        if start_idx == -1:  # worker crashed
+            raise RuntimeError(f"inference_worker crashed for {image_name}, check logs above")
+
         if prob_map is None:  # first result reveals n_classes
             n_classes = probs.shape[1]
             prob_map = np.zeros((num_pixels, n_classes), dtype=np.float16)
+
 
         prob_map[start_idx : start_idx + len(probs)] = probs
 

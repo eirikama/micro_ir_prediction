@@ -1,7 +1,19 @@
 import numpy as np
 from scipy.signal import hilbert
 
-from src.physics.mie import q_ext_sca_na
+import numpy as np
+# Restore removed aliases for legacy Cython extensions (removed in NumPy 1.24)
+for _alias, _target in [
+    ("complex", np.complex128),
+    ("float",   np.float64),
+    ("int",     np.int_),
+    ("bool",    np.bool_),
+]:
+    if not hasattr(np, _alias):
+        setattr(np, _alias, _target)
+
+from src.physics.sphere.sphere_mie import q_ext_sca_na
+from src.physics.cylinder.cylinder_mie import cyl_q_ext_sca_na
 
 
 def get_imagpart(pure_absorbance, wavelength, radius, factor=1):
@@ -23,10 +35,38 @@ def get_nkk(imag_part, wavelengths: np.ndarray, pad_size=200):
         return -nkk
 
 
-def add_scattering(spec, wn, r, n0, n_im, theta_max, h, scatt_coeff, theta_res=15):
+def add_cylindrical_scattering(spec, wns, r, n0, n_im, theta_na, h, scatt_coeff, theta_res=25):
+    wls = 1e4 / wns[None]
+
+
     n_const = n0 + n_im * 1j
+    n_i = get_imagpart(spec, wls, r, factor=h)
+    n_r = get_nkk(n_i, wls.squeeze())
+    ms = n_const + n_r + 1j * n_i
+
+    QextI, QabsI, QscaI, QextII, QabsII, QscaII, qscaNA = cyl_q_ext_sca_na(
+        wns,
+        ms.conj(),
+        r,
+        theta_na=theta_na,
+        theta_res=theta_res,
+    )
+
+    qabs    = (QabsI.real + QabsII.real) / 2
+    qsca_total  = (QscaI.real + QscaII.real) / 2
+    qsca_lost   = qsca_total - qscaNA
+
+    q_effective = scatt_coeff * qabs +  qsca_lost
+
+    q_norm = q_effective / np.abs(q_effective).max(axis=1, keepdims=True)
+    A = -np.log10(1 - 0.6 * q_norm)
+
+    return A
+
+def add_scattering(spec, wn, r, n0, n_im, theta_max, h, scatt_coeff, theta_res=15):
     wls = 10e3 / wn[None]
 
+    n_const = n0 + n_im * 1j
     n_i = get_imagpart(spec, wls, r, factor=h)
     n_r = get_nkk(n_i, wls.squeeze())
 

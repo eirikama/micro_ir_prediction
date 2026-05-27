@@ -5,7 +5,7 @@
 # cython: nonecheck=False
 
 from libc.stdlib cimport malloc, free
-from libc.math cimport sin, cos, round, pow, M_PI
+from libc.math cimport sin, cos, round, pow, M_PI, exp
 from cython.parallel import prange
 import cython
 from typing import Union as U
@@ -13,10 +13,15 @@ import numpy as np
 cimport numpy as np
 np.import_array()
 
+from scipy.special.cython_special cimport jv, yv, y0, y1
+from numpy.math cimport INFINITY
+
 cdef extern from "<complex>" namespace "std" nogil:
     double complex csin "sin"(double complex z)
     double complex ccos "cos"(double complex z)
-
+    double complex csqrt "sqrt"(double complex z)
+    double complex cexp "exp"(double complex z)
+    double complex cabs "abs"(double complex z)
 
 # ── dependency 1: Fast recurrence for angular functions ───────────────────────
 @cython.boundscheck(False)

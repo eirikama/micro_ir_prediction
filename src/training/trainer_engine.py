@@ -29,9 +29,9 @@ def run_training(
         verbose=False,
         mode="max",
     )
-
     trainer = pl.Trainer(
-        max_epochs=cfg.trainer.max_epochs,
+        min_epochs=cfg.trainer.min_epochs,
+        max_epochs=max(cfg.trainer.max_epochs, cfg.trainer.min_epochs),
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
         precision=cfg.trainer.precision,

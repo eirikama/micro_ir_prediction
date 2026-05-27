@@ -1,13 +1,21 @@
 defaults:
-  - model: aacnn
-  - data: default
-  - trainer: default
-  - inference: default
+  - domain: microplastic
+  - data: data_config
+  - model: aacnn_config
+  - trainer: trainer_config
+  - inference: inference_config
   - _self_
+
+  - /domain@_global_: ${domain}
+  - /domain/${domain}/data/default@data
+  - /domain/${domain}/model/aacnn@model
+  - /domain/${domain}/trainer/default@trainer
+  - /domain/${domain}/inference/default@inference
+
 
 mlflow:
   tracking_uri:    "sqlite:////app/mlflow.db"
-  experiment_name: "microplastics_raw"
+  experiment_name: ???
 
 mode: all
 seed: 42

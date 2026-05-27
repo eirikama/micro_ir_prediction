@@ -3,7 +3,7 @@ import getpass
 import logging
 import platform
 import time
-from collections import defaultdict
+from collections import defaultdict, Counter
 import git
 
 import hydra
@@ -43,7 +43,12 @@ def main(cfg: DictConfig) -> None:
     pl.seed_everything(cfg.seed)
 
 
-    train_test_split = create_experiment_split(cfg.data.zarr_path, split_ratio=cfg.data.train_split_size)
+    train_test_split = create_experiment_split(cfg.data.zarr_path,
+                                               split_ratio=cfg.data.train_split_size,
+                                               seed=cfg.seed)
+
+    print("Train:", Counter(d["label"] for d in train_test_split["train"]))
+    print("Test: ", Counter(d["label"] for d in train_test_split["test"]))
 
     datamodule = SpectralDataModule(train_test_split["train"], cfg.data)
     datamodule.setup()
@@ -123,7 +128,6 @@ def main(cfg: DictConfig) -> None:
                 )
 
                 t0 = time.time()
-
                 best_path, best_score, final_epoch, stopped_early = run_training(
                     cfg, model, datamodule, mlf_logger
                 )
@@ -201,14 +205,19 @@ def main(cfg: DictConfig) -> None:
                                 },
                             )
 
-                            bg_prob = prob_map[:, :, cfg.inference.background_idx].flatten()
-                            argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
-                            mask = bg_prob <= cfg.inference.bg_threshold
-                            acc = (
-                                float(np.mean(argmax[mask] == true_idx))
-                                if mask.sum() > 0
-                                else float("nan")
-                            )
+                            if True:
+                                bg_prob = prob_map[:, :, cfg.inference.background_idx].flatten()
+                                argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
+                                mask = bg_prob <= cfg.inference.bg_threshold
+                                acc = (
+                                    float(np.mean(argmax[mask] == true_idx))
+                                    if mask.sum() > 0
+                                    else float("nan")
+                                )
+                            else:
+                                argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
+                                acc = float(np.mean(argmax == true_idx))
+
 
                             image_metrics.append({"image": img_label, "accuracy": acc})
                             mlflow.log_metric(f"Inference/acc_{safe_label}", acc, step=i)
