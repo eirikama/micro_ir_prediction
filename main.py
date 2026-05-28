@@ -19,13 +19,12 @@ import subprocess
 
 from src.configs.config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
 from src.data.datamodule import SpectralDataModule
-from src.data.sampling import create_experiment_split
+from src.data.sampling import create_experiment_split, get_test_split
 from src.inference.inference_engine import run_inference
 from src.inference.export_inference import open_pred_store, save_inference_outputs_zarr
 from src.training.trainer_engine import run_training
 from src.models.aacnn import AACNN
 from src.utils import silence_warnings, setup_git
-
 
 log = logging.getLogger(__name__)
 
@@ -43,14 +42,21 @@ def main(cfg: DictConfig) -> None:
     pl.seed_everything(cfg.seed)
 
 
-    train_test_split = create_experiment_split(cfg.data.zarr_path,
-                                               split_ratio=cfg.data.train_split_size,
-                                               seed=cfg.seed)
+    if cfg.data.intrinsic_validation == True:
 
-    print("Train:", Counter(d["label"] for d in train_test_split["train"]))
-    print("Test: ", Counter(d["label"] for d in train_test_split["test"]))
+        train_test_split = create_experiment_split(cfg.data.zarr_path,
+                                                   split_ratio=cfg.data.train_split_size,
+                                                   seed=cfg.seed)
 
-    datamodule = SpectralDataModule(train_test_split["train"], cfg.data)
+        print("Train:", Counter(d["label"] for d in train_test_split["train"]))
+        print("Test: ", Counter(d["label"] for d in train_test_split["test"]))
+        datamodule = SpectralDataModule(train_test_split["train"], cfg.data)
+        test_images = train_test_split["test"]
+
+    else:
+        datamodule = SpectralDataModule(None, cfg.data)
+        test_images = get_test_split(cfg.data.zarr_test_path, cfg.data.zarr_path)
+
     datamodule.setup()
     label_encoding = datamodule.label_encoding
 
@@ -164,7 +170,6 @@ def main(cfg: DictConfig) -> None:
                 if not cfg.inference.ckpt_path:
                     raise ValueError("ckpt_path must be set to run inference.")
 
-                test_images = train_test_split["test"]
                 image_metrics = []
                 failed = []
 
@@ -187,6 +192,9 @@ def main(cfg: DictConfig) -> None:
                                 image_name=img_name,
                                 ckpt_path=cfg.inference.ckpt_path,
                                 batch_size=cfg.inference.batch_size,
+                                zarr_path=cfg.data.zarr_test_path
+                                            if not cfg.data.intrinsic_validation
+                                            else cfg.data.zarr_path,
                             )
 
                             save_inference_outputs_zarr(
@@ -228,7 +236,10 @@ def main(cfg: DictConfig) -> None:
                             )
 
                         except Exception as e:
-                            log.warning("Inference failed for %s: %s", img_name, e)
+                            import traceback
+                            print(f"[INFERENCE FAILED] {img_name}: {e}", flush=True)
+                            print(traceback.format_exc(), flush=True)
+                            mlflow.log_text(traceback.format_exc(), f"errors/{img_name}_error.txt")
                             failed.append(img_name)
 
                 if image_metrics:
@@ -271,6 +282,11 @@ def main(cfg: DictConfig) -> None:
 
             mlflow.set_tag("status", "completed")
         except Exception as e:
+            import traceback
+            print(f"OUTER ------ [INFERENCE FAILED] {img_name}: {e}", flush=True)
+            print(traceback.format_exc(), flush=True)
+            mlflow.log_text(traceback.format_exc(), f"errors/{img_name}_error.txt")
+            failed.append(img_name)
             mlflow.set_tag("error", str(e))
             raise
 

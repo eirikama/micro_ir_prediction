@@ -91,3 +91,41 @@ def get_training_data(
             all_labels.append(np.zeros(len(p_bkg)))
 
     return np.hstack(all_labels), np.vstack(all_spectra), wn, label_encoding
+
+
+def get_test_split(
+    test_zarr_path: str,
+    train_zarr_path: str,
+    rocks: list[str] | None = None,
+    conditions: list[str] | None = None,
+) -> list[dict]:
+    """
+    Returns a list of {"name": str, "label": str} dicts for the inference loop.
+    One entry per (rock × condition × class) group in the test store.
+    """
+    root_train = zarr.open(train_zarr_path, mode="r")
+    root_test  = zarr.open(test_zarr_path,  mode="r")
+
+    train_classes = list(root_train.attrs["classes"])
+    test_classes  = list(root_test.attrs["classes"])
+    assert train_classes == test_classes, (
+        f"Class mismatch!\n  train: {train_classes}\n  test: {test_classes}"
+    )
+
+    test_images = []
+    for key in sorted(root_test.group_keys()):
+        attrs = root_test[key].attrs
+        if rocks      is not None and attrs.get("rock")      not in rocks:      continue
+        if conditions is not None and attrs.get("condition") not in conditions: continue
+
+        # Each mineral present in this rock×condition group gets its own entry
+        class_counts = attrs.get("class_counts", {})
+        for class_name in class_counts:
+            test_images.append({
+                "name":      key,           # e.g. "gabbro_dusty"
+                "label":     class_name,    # e.g. "olivine"
+                "rock":      attrs.get("rock"),
+                "condition": attrs.get("condition"),
+            })
+
+    return test_images

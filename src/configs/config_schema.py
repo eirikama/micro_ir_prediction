@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-
+from typing import Optional
 
 @dataclass
 class ModelConfig:
@@ -34,12 +34,14 @@ class InferenceConfig:
     batch_size: int = 512
     devices: list = field(default_factory=lambda: [0, 1])
     pred_store_path: str = "/app/outputs/predictions_raw.lmdb"
-    ckpt_path: str = ""
+    ckpt_path: Optional[str] = None
 
 
 @dataclass
 class DataConfig:
     zarr_path: str = ""
+    zarr_test_path: str = ""
+    intrinsic_validation: bool = False
     spectra_per_class: int = 8
     sample_to_bkg_spectra_ratio: int = 2
     max_sampling_per_class_attempts: int = 1000
