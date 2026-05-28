@@ -42,9 +42,9 @@ def save_inference_outputs_zarr(
     store: zarr.Group,
     N: int,
     seed: int,
+    true_idx: int | np.ndarray,
     background_idx: int = 0,
     top_k_save: int = 3,
-    true_idx: int | None = None,
     hparams: dict | None = None,
 ):
     H, W, n_classes = prob_map.shape
@@ -56,10 +56,10 @@ def save_inference_outputs_zarr(
     img_grp = store.require_group(f"{trial_id}/{image_name}")
     img_grp.attrs.update(
         {
+            "true_idx": true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
             "N": N,
             "seed": seed,
             "trial_id": trial_id,
-            "true_idx": true_idx,
             "background_idx": background_idx,
             "n_classes": n_classes,
             "top_k_saved": top_k_save,

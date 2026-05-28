@@ -1,3 +1,4 @@
+import zarr
 import gc
 import getpass
 import logging
@@ -171,17 +172,19 @@ def main(cfg: DictConfig) -> None:
                     raise ValueError("ckpt_path must be set to run inference.")
 
                 image_metrics = []
-                failed = []
+                failed        = []
+                root_test     = zarr.open(cfg.data.zarr_test_path, mode="r") \
+                                if not cfg.data.intrinsic_validation else None
 
                 log.info("Starting inference on %d images...", len(test_images))
-
                 t_infer_start = time.time()
+
                 with open_pred_store(cfg.inference.pred_store_path) as pred_store:
                     for i, img_data in enumerate(test_images):
-                        img_name = img_data["name"]
-                        img_label = img_data["label"]
-                        true_idx = label_encoding[img_label]
+                        img_name   = img_data["name"]
+                        img_label  = img_data["label"]
                         safe_label = img_label.replace(" ", "_").replace("/", "_")
+                        true_idx   = label_encoding.get(img_label) if cfg.data.intrinsic_validation else None
 
                         log.info("Inference [%d/%d]: %s", i + 1, len(test_images), img_name)
 
@@ -193,54 +196,71 @@ def main(cfg: DictConfig) -> None:
                                 ckpt_path=cfg.inference.ckpt_path,
                                 batch_size=cfg.inference.batch_size,
                                 zarr_path=cfg.data.zarr_test_path
-                                            if not cfg.data.intrinsic_validation
-                                            else cfg.data.zarr_path,
+                                          if not cfg.data.intrinsic_validation
+                                          else cfg.data.zarr_path,
                             )
 
+                            # Resolve y_true for saving and accuracy
+                            y_true = root_test[img_name]["y"][:] \
+                                     if not cfg.data.intrinsic_validation \
+                                     else true_idx
+
                             save_inference_outputs_zarr(
-                                prob_map=prob_map,
-                                image_name=img_name,
-                                store=pred_store,
-                                N=cfg.data.spectra_per_class,
-                                seed=cfg.seed,
-                                background_idx=cfg.inference.background_idx,
-                                top_k_save=cfg.inference.top_k_save,
-                                true_idx=true_idx,
-                                hparams={
-                                    "lr": cfg.model.lr,
-                                    "batch_size": cfg.data.batch_size,
-                                    "mlflow_run": run.info.run_id,
+                                prob_map       = prob_map,
+                                image_name     = img_name,
+                                store          = pred_store,
+                                N              = cfg.data.spectra_per_class,
+                                seed           = cfg.seed,
+                                true_idx       = y_true,
+                                background_idx = cfg.inference.background_idx,
+                                top_k_save     = cfg.inference.top_k_save,
+                                hparams        = {
+                                    "lr":          cfg.model.lr,
+                                    "batch_size":  cfg.data.batch_size,
+                                    "mlflow_run":  run.info.run_id,
                                 },
                             )
 
-                            if True:
-                                bg_prob = prob_map[:, :, cfg.inference.background_idx].flatten()
-                                argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
-                                mask = bg_prob <= cfg.inference.bg_threshold
-                                acc = (
-                                    float(np.mean(argmax[mask] == true_idx))
-                                    if mask.sum() > 0
-                                    else float("nan")
-                                )
+                            argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
+
+                            if not cfg.data.intrinsic_validation:
+                                # Per-spectrum accuracy against stored y labels
+                                acc_overall = float(np.mean(argmax == y_true))
+
+                                class_counts = dict(root_test[img_name].attrs["class_counts"])
+                                for class_name, count in class_counts.items():
+                                    class_idx = label_encoding.get(class_name)
+                                    if class_idx is None:
+                                        continue
+                                    mask = y_true == class_idx
+                                    if not mask.any():
+                                        continue
+                                    acc_cls  = float(np.mean(argmax[mask] == class_idx))
+                                    safe_cls = f"{img_name}_{class_name}".replace(" ", "_")
+                                    image_metrics.append({"image": safe_cls, "accuracy": acc_cls})
+                                    mlflow.log_metric(f"Inference/per_class/acc_{safe_cls}", acc_cls, step=i)
+
+                                image_metrics.append({"image": img_name, "accuracy": acc_overall})
+                                mlflow.log_metric(f"Inference/acc_{img_name}", acc_overall, step=i)
+                                acc = acc_overall   # for the log.info below
+
                             else:
-                                argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
-                                acc = float(np.mean(argmax == true_idx))
-
-
-                            image_metrics.append({"image": img_label, "accuracy": acc})
-                            mlflow.log_metric(f"Inference/acc_{safe_label}", acc, step=i)
+                                bg_prob = prob_map[:, :, cfg.inference.background_idx].flatten()
+                                mask    = bg_prob <= cfg.inference.bg_threshold
+                                acc     = float(np.mean(argmax[mask] == true_idx)) \
+                                          if mask.sum() > 0 else float("nan")
+                                image_metrics.append({"image": img_label, "accuracy": acc})
+                                mlflow.log_metric(f"Inference/per_class/acc_{safe_label}", acc, step=i)
 
                             log.info("  %s accuracy: %.4f", img_label, acc)
-                            mlflow.log_metric(
-                                f"Timer/per_class/infer_min_{safe_label}", (time.time() - t0) / 60
-                            )
+                            mlflow.log_metric(f"Timer/per_class/infer_min_{safe_label}",
+                                              (time.time() - t0) / 60)
 
                         except Exception as e:
                             import traceback
-                            print(f"[INFERENCE FAILED] {img_name}: {e}", flush=True)
-                            print(traceback.format_exc(), flush=True)
-                            mlflow.log_text(traceback.format_exc(), f"errors/{img_name}_error.txt")
-                            failed.append(img_name)
+                            mlflow.log_text(traceback.format_exc(), "errors/_main_error.txt")
+                            mlflow.set_tag("error", str(e))
+                            raise
 
                 if image_metrics:
                     accs = [m["accuracy"] for m in image_metrics if not np.isnan(m["accuracy"])]
@@ -252,20 +272,17 @@ def main(cfg: DictConfig) -> None:
 
                         for cls, cls_accs in class_accs.items():
                             safe = cls.replace(" ", "_").replace("/", "_")
-                            mlflow.log_metric(
-                                f"Inference/per_class/mean_acc_{safe}", float(np.mean(cls_accs))
-                            )
+                            mlflow.log_metric(f"Inference/per_class/mean_acc_{safe}",
+                                              float(np.mean(cls_accs)))
 
-                        mlflow.log_metrics(
-                            {
-                                "Inference/mean_accuracy": float(np.mean(accs)),
-                                "Inference/min_accuracy": float(np.min(accs)),
-                                "Inference/max_accuracy": float(np.max(accs)),
-                                "Inference/std_accuracy": float(np.std(accs)),
-                                "Inference/n_images_ok": len(accs),
-                                "Inference/n_images_failed": len(failed),
-                            }
-                        )
+                        mlflow.log_metrics({
+                            "Inference/mean_accuracy":   float(np.mean(accs)),
+                            "Inference/min_accuracy":    float(np.min(accs)),
+                            "Inference/max_accuracy":    float(np.max(accs)),
+                            "Inference/std_accuracy":    float(np.std(accs)),
+                            "Inference/n_images_ok":     len(accs),
+                            "Inference/n_images_failed": len(failed),
+                        })
 
                 mlflow.log_metric("Timer/total_infer_min", (time.time() - t_infer_start) / 60)
                 mlflow.set_tag("pred_store_path", cfg.inference.pred_store_path)
@@ -281,11 +298,10 @@ def main(cfg: DictConfig) -> None:
                 )
 
             mlflow.set_tag("status", "completed")
+
         except Exception as e:
             import traceback
-            print(f"OUTER ------ [INFERENCE FAILED] {img_name}: {e}", flush=True)
-            print(traceback.format_exc(), flush=True)
-            mlflow.log_text(traceback.format_exc(), f"errors/{img_name}_error.txt")
+            mlflow.log_text(traceback.format_exc(), f"errors/main_error.txt")
             failed.append(img_name)
             mlflow.set_tag("error", str(e))
             raise
