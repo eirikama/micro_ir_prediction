@@ -3,5 +3,5 @@ bg_threshold: 0.5
 top_k_save: 3
 batch_size: 128
 devices: [0, 1]
-pred_store_path: "/app/outputs/predictions_mlrod_raw.lmdb"
+pred_store_path: "/app/outputs/predictions_mlrod_full_augmentation.lmdb"
 ckpt_path: null

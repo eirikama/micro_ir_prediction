@@ -5,4 +5,4 @@ defaults:
   - /domain/mlrod/inference: default
 
 mlflow:
-  experiment_name: "mlrod_raw"
+  experiment_name: "mlrod_full_augmentation"

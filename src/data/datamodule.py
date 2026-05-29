@@ -19,7 +19,7 @@ for _alias, _target in [
     if not hasattr(np, _alias):
         setattr(np, _alias, _target)
 
-from src.data.augmentation import add_co2, add_polynomial, add_scattering #, add_cylindrical_scattering
+from src.data.augmentation import AUG_REGISTRY
 from src.data.sampling import create_experiment_split, get_training_data
 
 
@@ -69,60 +69,28 @@ class SpectralDataset(IterableDataset):
         s = self.spectra[idx].copy()
         y = self.y[idx]
         B = s.shape[0]
-        is_signal = y != 0
-        # is_signal = y < 10
 
-        # --- Mie Augmentation ---
-        mie_mask = is_signal & (np.random.rand(B) < self.cfg.mie_ratio)
-        if mie_mask.any():
-            s_subset = s[mie_mask]
-            s_subset -= s_subset.min(axis=1, keepdims=True)
-            s_subset /= s_subset.max(axis=1, keepdims=True) + 1e-9
+        # Only meaningful if background class exists in the training set
+        use_background = getattr(self.cfg, "include_bkg_pixels", False)
+        if use_background:
+            is_signal = y != 0
+        else:
+            is_signal = np.ones(B, dtype=bool)   # all samples treated as signal
 
-            n0s, rs, n_ims, hs, scs = (
-                np.random.uniform(low, high, (s_subset.shape[0], 1))
-                for low, high in [
-                    (self.cfg.n0_min, self.cfg.n0_max),
-                    (self.cfg.r_min, self.cfg.r_max),
-                    (self.cfg.n_imag_min, self.cfg.n_imag_max),
-                    (self.cfg.h_min, self.cfg.h_max),
-                    (self.cfg.scale_min, self.cfg.scale_max),
-                ]
-            )
-            theta = np.random.uniform(self.cfg.theta_min, self.cfg.theta_max)
-            if True:
-                s[mie_mask] = add_scattering(s_subset, self.wn, rs, n0s, n_ims, theta, hs, scs)
+        for aug_cfg in self.cfg.augmentations:
+            if not aug_cfg.enabled:
+                continue
+
+            if use_background and aug_cfg.get("signal_only", False):
+                base = is_signal
+            elif use_background and aug_cfg.get("background_only", False):
+                base = ~is_signal
             else:
-                s[mie_mask] = add_cylindrical_scattering(s_subset, self.wn, rs, n0s, n_ims, theta, hs, scs)
+                base = np.ones(B, dtype=bool)    # no signal/background distinction
 
-        # --- Vectorized Polynomials ---
-        poly_mask = is_signal & (np.random.rand(B) < self.cfg.poly_ratio)
-        bkg_mask = ~is_signal & (np.random.rand(B) < self.cfg.bkg_poly_ratio)
-
-        for mask, ranges in zip(
-            [poly_mask, bkg_mask],
-            [self.cfg.param_ranges, self.cfg.bkg_param_ranges],
-            strict=True
-        ):
+            mask = base & (np.random.rand(B) < aug_cfg.ratio)
             if mask.any():
-                n_samples = np.sum(mask)
-                lows = np.array([r[0] for r in ranges])
-                highs = np.array([r[1] for r in ranges])
-                params = (np.random.rand(n_samples, 4) * (highs - lows) + lows).T
-                s[mask] = add_polynomial(s[mask], self.wn, params)
-
-        noise_mask = np.random.rand(B) < self.cfg.noise_ratio
-
-        if noise_mask.any():
-            n_noisy = noise_mask.sum()
-            noise_scales = np.random.rand(n_noisy, 1) * self.cfg.max_noise_level
-            s[noise_mask] += np.random.normal(0, 1, s[noise_mask].shape) * noise_scales
-
-        co2_mask = np.random.rand(B) < self.cfg.co2_ratio
-
-        if co2_mask.any():
-            s_subset = s[co2_mask]
-            s[co2_mask] = add_co2(s_subset, self.wn, self.cfg.co2_params)
+                s = AUG_REGISTRY[aug_cfg.type](s, mask, self.wn, aug_cfg)
 
         return torch.from_numpy(s).float().unsqueeze(1), torch.from_numpy(y).long()
 
@@ -152,6 +120,7 @@ class SpectralDataModule(pl.LightningDataModule):
             include_bkg_pixels=self.cfg.include_bkg_pixels
         )
         self.wn = wn
+        self.spectra = spectra
         self.label_encoding = label_encoding
 
         s_train, s_val, l_train, l_val = train_test_split(

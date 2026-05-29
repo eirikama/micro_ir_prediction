@@ -8,7 +8,7 @@ __pycache__/
 .ruff_cache/
 
 # cython
-src/Physics/build/
+src/physics/build/
 src/physics/*.so
 src/physics/*.o
 src/physics/*.cpp

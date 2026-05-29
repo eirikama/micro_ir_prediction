@@ -20,6 +20,7 @@ import subprocess
 
 from src.configs.config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
 from src.data.datamodule import SpectralDataModule
+from src.data.augmentation import _apply_fluorescence
 from src.data.sampling import create_experiment_split, get_test_split
 from src.inference.inference_engine import run_inference
 from src.inference.export_inference import open_pred_store, save_inference_outputs_zarr
@@ -60,6 +61,15 @@ def main(cfg: DictConfig) -> None:
 
     datamodule.setup()
     label_encoding = datamodule.label_encoding
+    aug_list = cfg.data.get("augmentations", None)
+    if aug_list is not None:
+        for aug_cfg in aug_list:
+            aug_name = aug_cfg.get("type") or aug_cfg.get("name")
+            if aug_name == "fluorescence" and aug_cfg.get("enabled", True):
+                print(f"[fluorescence] fitting on {datamodule.spectra.shape[0]} spectra", flush=True)
+                _apply_fluorescence.fit(datamodule.wn, datamodule.spectra, aug_cfg)
+                print(f"[fluorescence] fit complete, cache: {list(_apply_fluorescence._cache)}", flush=True)
+                break
 
     run_name = f"N{cfg.data.spectra_per_class}_seed{cfg.seed}"
 
@@ -302,7 +312,6 @@ def main(cfg: DictConfig) -> None:
         except Exception as e:
             import traceback
             mlflow.log_text(traceback.format_exc(), f"errors/main_error.txt")
-            failed.append(img_name)
             mlflow.set_tag("error", str(e))
             raise
 

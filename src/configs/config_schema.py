@@ -53,29 +53,8 @@ class DataConfig:
     background_max: float = 0.1
     include_bkg_pixels: bool = True
 
-    mie_ratio: float = 0.0
-    poly_ratio: float = 0.6
-    bkg_poly_ratio: float = 0.6
-    noise_ratio: float = 0.6
-    co2_ratio: float = 0.2
-
-    param_ranges: list[list[float]] = field(default_factory=list)
-    bkg_param_ranges: list[list[float]] = field(default_factory=list)
-    co2_params: list[float] = field(default_factory=list)
-
-    max_noise_level: float = 0.05
-    theta_min: float = 0.2
-    theta_max: float = 0.45
-    n0_min: float = 1.25
-    n0_max: float = 1.65
-    r_min: float = 2.0
-    r_max: float = 14.0
-    n_imag_min: float = 1e-4
-    n_imag_max: float = 1e-2
-    h_min: float = 1.5
-    h_max: float = 2.5
-    scale_min: float = 1.5
-    scale_max: float = 2.5
+    modality: str = "ir"
+    augmentations: list = field(default_factory=list)
 
 @dataclass
 class MasterConfig:
