@@ -1,0 +1,8 @@
+defaults:
+  - /domain/mlrod/data: default
+  - /domain/mlrod/model: aacnn
+  - /domain/mlrod/trainer: default
+  - /domain/mlrod/inference: default
+
+mlflow:
+  experiment_name: "bacteria_raw"

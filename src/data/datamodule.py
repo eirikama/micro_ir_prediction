@@ -24,13 +24,14 @@ from src.data.sampling import create_experiment_split, get_training_data
 
 
 class SpectralDataset(IterableDataset):
-    def __init__(self, spectra: np.ndarray, y: np.ndarray, wn: np.ndarray, cfg: DictConfig) -> None:
+    def __init__(self, spectra: np.ndarray, y: np.ndarray, wn: np.ndarray, cfg: DictConfig, augment: bool) -> None:
 
         self.spectra = spectra.cpu().numpy() if torch.is_tensor(spectra) else spectra
         self.y = y.cpu().numpy() if torch.is_tensor(y) else y
         self.wn = wn.cpu().numpy() if torch.is_tensor(wn) else wn
 
         self.cfg = cfg
+        self.augment = augment
 
         # 1. Group indices by class
         self.unique_classes = np.unique(self.y)
@@ -70,27 +71,32 @@ class SpectralDataset(IterableDataset):
         y = self.y[idx]
         B = s.shape[0]
 
-        # Only meaningful if background class exists in the training set
-        use_background = getattr(self.cfg, "include_bkg_pixels", False)
-        if use_background:
-            is_signal = y != 0
-        else:
-            is_signal = np.ones(B, dtype=bool)   # all samples treated as signal
-
-        for aug_cfg in self.cfg.augmentations:
-            if not aug_cfg.enabled:
-                continue
-
-            if use_background and aug_cfg.get("signal_only", False):
-                base = is_signal
-            elif use_background and aug_cfg.get("background_only", False):
-                base = ~is_signal
+        if self.augment:
+            use_background = getattr(self.cfg, "include_bkg_pixels", False)
+            if use_background:
+                is_signal = y != 0
             else:
-                base = np.ones(B, dtype=bool)    # no signal/background distinction
+                is_signal = np.ones(B, dtype=bool)   # all samples treated as signal
 
-            mask = base & (np.random.rand(B) < aug_cfg.ratio)
-            if mask.any():
-                s = AUG_REGISTRY[aug_cfg.type](s, mask, self.wn, aug_cfg)
+            for aug_cfg in self.cfg.augmentations:
+                if not aug_cfg.enabled:
+                    continue
+
+                if use_background and aug_cfg.get("signal_only", False):
+                    base = is_signal
+                elif use_background and aug_cfg.get("background_only", False):
+                    base = ~is_signal
+                else:
+                    base = np.ones(B, dtype=bool)    # no signal/background distinction
+
+                mask = base & (np.random.rand(B) < aug_cfg.ratio)
+                if mask.any():
+                    s = AUG_REGISTRY[aug_cfg.type](s, mask, self.wn, aug_cfg)
+
+        if self.cfg.z_normalize:
+            mu = s.mean(axis=1, keepdims=True)
+            sigma = s.std(axis=1, keepdims=True)
+            s = (s - mu) / (sigma + 1e-8)
 
         return torch.from_numpy(s).float().unsqueeze(1), torch.from_numpy(y).long()
 
@@ -130,11 +136,11 @@ class SpectralDataModule(pl.LightningDataModule):
         self.steps_per_epoch = len(l_train) // self.cfg.batch_size
         self.val_batches = len(l_val) // self.cfg.batch_size
 
-        self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.cfg)
-        self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg)
+        self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.cfg, self.cfg.augment_train)
+        self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg, self.cfg.augment_val)
 
     def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train_ds, batch_size=None, pin_memory=True)
+        return DataLoader(self.train_ds, batch_size=None, pin_memory=False)
 
     def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.val_ds, batch_size=None, pin_memory=True)
+        return DataLoader(self.val_ds, batch_size=None, pin_memory=False)

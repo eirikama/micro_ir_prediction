@@ -1,0 +1,8 @@
+conv_channels: 32
+kernel_size: 21
+pred_dropout: 0.2
+num_classes: 31
+alpha: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+gamma: 1
+lr: 0.00005
+weight_decay: 0.01

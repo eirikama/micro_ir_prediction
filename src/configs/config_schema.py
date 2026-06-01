@@ -52,6 +52,9 @@ class DataConfig:
     sample_min: float = 0.5
     background_max: float = 0.1
     include_bkg_pixels: bool = True
+    z_normalize: bool = True
+    augment_train: bool = True
+    augment_val: bool = True
 
     modality: str = "ir"
     augmentations: list = field(default_factory=list)

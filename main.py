@@ -61,15 +61,17 @@ def main(cfg: DictConfig) -> None:
 
     datamodule.setup()
     label_encoding = datamodule.label_encoding
-    aug_list = cfg.data.get("augmentations", None)
-    if aug_list is not None:
-        for aug_cfg in aug_list:
-            aug_name = aug_cfg.get("type") or aug_cfg.get("name")
-            if aug_name == "fluorescence" and aug_cfg.get("enabled", True):
-                print(f"[fluorescence] fitting on {datamodule.spectra.shape[0]} spectra", flush=True)
-                _apply_fluorescence.fit(datamodule.wn, datamodule.spectra, aug_cfg)
-                print(f"[fluorescence] fit complete, cache: {list(_apply_fluorescence._cache)}", flush=True)
-                break
+
+    if cfg.data.augment_train or cfg.data.augment_val:
+        aug_list = cfg.data.get("augmentations", None)
+        if aug_list is not None:
+            for aug_cfg in aug_list:
+                aug_name = aug_cfg.get("type") or aug_cfg.get("name")
+                if aug_name == "fluorescence" and aug_cfg.get("enabled", True):
+                    print(f"[fluorescence] fitting on {datamodule.spectra.shape[0]} spectra", flush=True)
+                    _apply_fluorescence.fit(datamodule.wn, datamodule.spectra, aug_cfg)
+                    print(f"[fluorescence] fit complete, cache: {list(_apply_fluorescence._cache)}", flush=True)
+                    break
 
     run_name = f"N{cfg.data.spectra_per_class}_seed{cfg.seed}"
 

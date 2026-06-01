@@ -93,24 +93,24 @@ def get_training_data(
     return np.hstack(all_labels), np.vstack(all_spectra), wn, label_encoding
 
 
-# In get_test_split — return one entry per group, not per class
 def get_test_split(test_zarr_path, train_zarr_path, rocks=None, conditions=None):
-    root_train = zarr.open(train_zarr_path, mode="r")
-    root_test  = zarr.open(test_zarr_path,  mode="r")
-
+    root_train    = zarr.open(train_zarr_path, mode="r")
+    root_test     = zarr.open(test_zarr_path,  mode="r")
     train_classes = list(root_train.attrs["classes"])
     test_classes  = list(root_test.attrs["classes"])
-    assert train_classes == test_classes
-
+    assert train_classes == test_classes, (
+        f"Class mismatch!\n  train: {train_classes}\n  test:  {test_classes}"
+    )
     test_images = []
     for key in sorted(root_test.group_keys()):
-        attrs = root_test[key].attrs
+        grp   = root_test[key]
+        attrs = grp.attrs
         if rocks      is not None and attrs.get("rock")      not in rocks:      continue
         if conditions is not None and attrs.get("condition") not in conditions: continue
         test_images.append({
             "name":      key,
-            "label":     attrs.get("rock", key),
+            "label":     attrs.get("rock", key),   # falls back to key for bacteria
             "rock":      attrs.get("rock"),
             "condition": attrs.get("condition"),
         })
-    return test_images   #
+    return test_images

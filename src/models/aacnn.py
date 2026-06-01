@@ -38,7 +38,8 @@ class AACNN(pl.LightningModule):
         self.pred_dropout = nn.Dropout(config.pred_dropout)
 
         alpha_weights = torch.tensor(config.alpha)
-        self.loss_fn = FocalLoss(gamma=config.gamma, alpha=alpha_weights)
+        # self.loss_fn = FocalLoss(gamma=config.gamma, alpha=alpha_weights)
+        self.loss_fn = nn.CrossEntropyLoss()
         self.train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=config.num_classes)
         self.val_acc = torchmetrics.Accuracy(task="multiclass", num_classes=config.num_classes)
 
