@@ -14,8 +14,8 @@ sample_min: 0.0
 background_max: 0.0
 include_bkg_pixels: False
 z_normalize: True
-augment_train: False
-augment_val: False
+augment_train: True
+augment_val: True
 
 modality: raman
 augmentations:

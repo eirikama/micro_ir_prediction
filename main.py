@@ -45,7 +45,6 @@ def main(cfg: DictConfig) -> None:
 
 
     if cfg.data.intrinsic_validation == True:
-
         train_test_split = create_experiment_split(cfg.data.zarr_path,
                                                    split_ratio=cfg.data.train_split_size,
                                                    seed=cfg.seed)
@@ -62,16 +61,34 @@ def main(cfg: DictConfig) -> None:
     datamodule.setup()
     label_encoding = datamodule.label_encoding
 
-    if cfg.data.augment_train or cfg.data.augment_val:
-        aug_list = cfg.data.get("augmentations", None)
-        if aug_list is not None:
-            for aug_cfg in aug_list:
-                aug_name = aug_cfg.get("type") or aug_cfg.get("name")
-                if aug_name == "fluorescence" and aug_cfg.get("enabled", True):
-                    print(f"[fluorescence] fitting on {datamodule.spectra.shape[0]} spectra", flush=True)
-                    _apply_fluorescence.fit(datamodule.wn, datamodule.spectra, aug_cfg)
-                    print(f"[fluorescence] fit complete, cache: {list(_apply_fluorescence._cache)}", flush=True)
-                    break
+    aug_list = list(cfg.data.get("augmentations", None) or [])
+
+    if (cfg.data.augment_train or cfg.data.augment_val) and aug_list:
+        for aug_cfg in aug_list:
+            aug_name = aug_cfg.get("type") or aug_cfg.get("name")
+            if aug_name == "fluorescence" and aug_cfg.get("enabled", True):
+                print(f"[fluorescence] fitting on {datamodule.spectra.shape[0]} spectra", flush=True)
+                _apply_fluorescence.fit(datamodule.wn, datamodule.spectra, aug_cfg)
+                print(f"[fluorescence] fit complete", flush=True)
+                break
+
+    aug_summary = OmegaConf.to_container(
+        cfg.data.augmentations, resolve=True
+    ) if aug_list else []
+
+    aug_summary_dict = {}
+    for aug_cfg in aug_summary:
+        aug_name = aug_cfg.pop("type", None) or aug_cfg.pop("name", None)
+        aug_summary_dict[aug_name] = aug_cfg
+    aug_summary_dict["augment_train"] = cfg.data.augment_train
+    aug_summary_dict["augment_val"]   = cfg.data.augment_val
+
+
+    if cfg.data.augment_train and aug_list:
+        enabled = [a.get("type") for a in aug_list if a.get("enabled", True)]
+        aug_tag  = "+".join(sorted(enabled)) if enabled else "none"
+    else:
+        aug_tag = "none"
 
     run_name = f"N{cfg.data.spectra_per_class}_seed{cfg.seed}"
 
@@ -97,6 +114,15 @@ def main(cfg: DictConfig) -> None:
     with mlflow.start_run(run_id=mlf_logger.run_id) as run:
         try:
             log.info("MLflow run started: %s | ID: %s", run_name, run.info.run_id)
+
+            mlflow.log_param("aug/summary", aug_tag)
+            mlflow.log_dict(aug_summary_dict, "augmentation_config.json")
+            for aug_name, aug_info in aug_summary_dict.items():
+                if isinstance(aug_info, dict):
+                    for k, v in aug_info.items():
+                        mlflow.log_param(f"aug/{aug_name}/{k}", v)
+                else:
+                    mlflow.log_param(f"aug/{aug_name}", aug_info)
 
             params = OmegaConf.to_container(cfg, resolve=True)
             mlflow.log_params(params)
@@ -226,6 +252,7 @@ def main(cfg: DictConfig) -> None:
                                 true_idx       = y_true,
                                 background_idx = cfg.inference.background_idx,
                                 top_k_save     = cfg.inference.top_k_save,
+                                aug_summary    = aug_summary_dict,
                                 hparams        = {
                                     "lr":          cfg.model.lr,
                                     "batch_size":  cfg.data.batch_size,

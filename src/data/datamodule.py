@@ -137,7 +137,7 @@ class SpectralDataModule(pl.LightningDataModule):
         self.val_batches = len(l_val) // self.cfg.batch_size
 
         self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.cfg, self.cfg.augment_train)
-        self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg, self.cfg.augment_val)
+        self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg, self.cfg.augment_train and self.cfg.augment_val)
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(self.train_ds, batch_size=None, pin_memory=False)

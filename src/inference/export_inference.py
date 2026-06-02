@@ -45,10 +45,23 @@ def save_inference_outputs_zarr(
     true_idx: int | np.ndarray,
     background_idx: int = 0,
     top_k_save: int = 3,
+    aug_summary: dict | None = None,
     hparams: dict | None = None,
 ):
+
+    aug_summary = aug_summary or {}
+    if aug_summary.get("augment_train", False):
+        enabled = sorted([
+            k for k, v in aug_summary.items()
+            if isinstance(v, dict) and v.get("enabled", False)
+        ])
+        aug_tag = "+".join(enabled) if enabled else "aug_none"
+    else:
+        aug_tag = "raw"
+
+    trial_id = f"N{N}_seed{seed:02d}_{aug_tag}"
+
     H, W, n_classes = prob_map.shape
-    trial_id = f"N{N}_seed{seed:02d}"
     compressor = zarr.Blosc(cname="lz4", clevel=3, shuffle=zarr.Blosc.BITSHUFFLE)
     chunk_hw = _chunk_for(H, W)
     chunk_hwk = (*chunk_hw, top_k_save)
@@ -65,6 +78,7 @@ def save_inference_outputs_zarr(
             "top_k_saved": top_k_save,
             "H": H,
             "W": W,
+            "aug": aug_summary or {},
             **(hparams or {}),
         }
     )
