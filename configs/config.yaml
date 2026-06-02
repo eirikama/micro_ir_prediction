@@ -13,6 +13,8 @@ defaults:
   - /domain/${domain}/inference/default@inference
 
 
+tracking: mlflow   # mlflow | wandb | none
+
 mlflow:
   tracking_uri:    "sqlite:////app/mlflow.db"
   experiment_name: ???

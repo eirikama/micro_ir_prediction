@@ -1,4 +1,5 @@
 import gc
+import sys
 import numpy as np
 import torch
 import torch.multiprocessing as mp
@@ -80,13 +81,36 @@ def inference_worker(
 
 
 def run_inference(
-    cfg: DictConfig,
-    image_name: str,
-    ckpt_path: str,
+    cfg: DictConfig | None = None,
+    image_name: str = "",
+    ckpt_path: str = "",
     batch_size: int = 512,
-    zarr_path: str = None,
+    zarr_path: str | None = None,
+    devices: list[int] | None = None,
 ) -> np.ndarray:
-    zarr_path = zarr_path or cfg.data.zarr_path
+    """Run pixel-wise inference on one image.
+
+    Can be called with a full Hydra cfg (as in main.py) or standalone with
+    explicit arguments — cfg is not required when zarr_path and devices are
+    provided directly.
+
+    Args:
+        cfg:        Hydra DictConfig (optional — used by main.py).
+        image_name: Key of the image inside the zarr store.
+        ckpt_path:  Path to the Lightning checkpoint.
+        batch_size: Number of pixels per GPU batch.
+        zarr_path:  Path to the zarr store. Falls back to cfg.data.zarr_path
+                    when cfg is provided and zarr_path is None.
+        devices:    List of GPU ids, e.g. [0] or [0, 1]. Defaults to [0] when
+                    cfg is not provided.
+    """
+    if cfg is not None:
+        zarr_path = zarr_path or cfg.data.zarr_path
+        devices   = list(cfg.inference.devices)
+    else:
+        if not zarr_path:
+            raise ValueError("zarr_path is required when cfg is not provided")
+        devices = list(devices) if devices is not None else [0]
 
     _, H, W, Bands = _open_z_arr(zarr_path, image_name)  # shape only, workers load data
     num_pixels = H * W
@@ -95,7 +119,7 @@ def run_inference(
     output_queue = mp.Queue()
     processes    = []
 
-    for gpu_id in cfg.inference.devices:
+    for gpu_id in devices:
         p = mp.Process(
             target=inference_worker,
             args=(gpu_id, ckpt_path, input_queue, output_queue, zarr_path, image_name),
@@ -124,3 +148,117 @@ def run_inference(
         p.join()
 
     return prob_map.reshape(H, W, n_classes)
+
+
+def predict_array(
+    spectra: np.ndarray,
+    ckpt_path: str,
+    batch_size: int = 512,
+    device: int | str = 0,
+    z_normalize: bool = False,
+) -> np.ndarray:
+    """Run inference directly on a numpy array — no zarr store required.
+
+    This is the entry point for notebooks, scripts, and non-zarr pipelines.
+    It runs on a single device (no multiprocessing), so it is straightforward
+    to call interactively.
+
+    Args:
+        spectra:     Hyperspectral data as a numpy array.
+                     Shape ``(H, W, L)`` for a 2-D image, or ``(N, L)`` for a
+                     flat list of spectra.  dtype can be float32 or float64;
+                     conversion is handled internally.
+        ckpt_path:   Path to the Lightning ``.ckpt`` checkpoint file.
+        batch_size:  Number of spectra processed per forward pass.
+                     Reduce if you run out of GPU memory.
+        device:      GPU index (``0``, ``1``, …) or ``"cpu"`` for CPU-only
+                     inference.  Falls back to CPU automatically when CUDA is
+                     not available.
+        z_normalize: Apply per-spectrum z-score normalisation before inference.
+                     Set this to ``True`` if ``data.z_normalize: True`` was
+                     used during training and the model does not include an
+                     internal normalisation layer.
+
+    Returns:
+        Probability maps as float16:
+
+        - Input ``(H, W, L)`` → output ``(H, W, n_classes)``
+        - Input ``(N, L)``    → output ``(N, n_classes)``
+
+    Example::
+
+        import numpy as np
+        from src.inference.inference_engine import predict_array
+
+        cube = np.load("my_image.npy")          # (H, W, L)
+        prob_map = predict_array(cube, "checkpoints/best.ckpt")
+        argmax   = prob_map.argmax(-1)           # (H, W)
+    """
+    if spectra.ndim not in (2, 3):
+        raise ValueError(
+            f"Expected a 2-D (N, L) or 3-D (H, W, L) array; got shape {spectra.shape}"
+        )
+
+    # ── flatten to (N, L) ─────────────────────────────────────────────────────
+    is_image = spectra.ndim == 3
+    if is_image:
+        H, W, L = spectra.shape
+        flat = spectra.reshape(-1, L).astype(np.float32)
+    else:
+        flat = spectra.astype(np.float32)
+        H = W = None
+
+    N = len(flat)
+
+    # ── optional z-normalisation ──────────────────────────────────────────────
+    if z_normalize:
+        mu    = flat.mean(axis=1, keepdims=True)
+        sigma = flat.std(axis=1, keepdims=True)
+        flat  = (flat - mu) / (sigma + 1e-8)
+
+    # ── resolve device ────────────────────────────────────────────────────────
+    if isinstance(device, int):
+        if torch.cuda.is_available():
+            dev = torch.device(f"cuda:{device}")
+        else:
+            print(
+                "Warning: CUDA not available — running on CPU (may be slow).",
+                file=sys.stderr,
+            )
+            dev = torch.device("cpu")
+    else:
+        dev = torch.device(device)
+
+    # ── load model ────────────────────────────────────────────────────────────
+    model = (
+        AACNN.load_from_checkpoint(ckpt_path, weights_only=False)
+        .to(dev)
+        .half()
+        .eval()
+    )
+
+    # ── batched forward pass ──────────────────────────────────────────────────
+    results: list[np.ndarray] = []
+    with torch.inference_mode():
+        for start in range(0, N, batch_size):
+            end   = min(start + batch_size, N)
+            chunk = (
+                torch.from_numpy(flat[start:end])
+                .unsqueeze(1)           # (B, 1, L)
+                .to(dev, non_blocking=True)
+                .half()
+            )
+            probs = F.softmax(model(chunk), dim=1).cpu().numpy().astype(np.float16)
+            results.append(probs)
+
+    del model
+    if dev.type == "cuda":
+        torch.cuda.empty_cache()
+
+    # ── reassemble ────────────────────────────────────────────────────────────
+    prob_flat = np.concatenate(results, axis=0)   # (N, n_classes)
+    n_classes = prob_flat.shape[1]
+
+    if is_image:
+        return prob_flat.reshape(H, W, n_classes)
+    return prob_flat
