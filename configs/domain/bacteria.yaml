@@ -1,8 +1,8 @@
 defaults:
-  - /domain/mlrod/data: default
-  - /domain/mlrod/model: aacnn
-  - /domain/mlrod/trainer: default
-  - /domain/mlrod/inference: default
+  - /domain/bacteria/data: default
+  - /domain/bacteria/model: aacnn
+  - /domain/bacteria/trainer: default
+  - /domain/bacteria/inference: default
 
 mlflow:
-  experiment_name: "bacteria"
+  experiment_name: "bacteria_full_augmentation"

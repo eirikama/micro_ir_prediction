@@ -1,4 +1,5 @@
 zarr_path: "/mnt/ssd3/eirik/ProcessedData/ase_pollen_library.zarr"
+intrinsic_validation: True
 spectra_per_class: 64
 sample_to_bkg_spectra_ratio: 2
 max_sampling_per_class_attempts: 1000
@@ -11,38 +12,56 @@ sample_min: 0.3
 background_max: 0.05
 include_bkg_pixels: True
 
-mie_ratio:  0.
-poly_ratio:  0.
-bkg_poly_ratio: 0.
-noise_ratio: 0.
-co2_ratio:  0.
+z_normalize: True
+augment_train: True
+augment_val: False
 
-param_ranges: [
-    [-1.0, 2.5],
-    [0.1, 4.0],
-    [-0.01, 0.01],
-    [-0.001, -0.001]
-]
+modality: ir
+augmentations:
+  - type: mie_scattering
+    enabled: False
+    signal_only: True
+    ratio: 0.0
+    variant: spherical
+    n0_min: 1.25
+    n0_max: 1.65
+    r_min: 2.0
+    r_max: 16.0
+    n_imag_min: 1.0e-5
+    n_imag_max: 1.0e-2
+    h_min: 1.0
+    h_max: 1.5
+    scale_min: 2.5
+    scale_max: 4.5
+    theta_min: 0.2
+    theta_max: 0.45
 
-bkg_param_ranges: [
-    [-2.0, 2.0],
-    [0.01, 2.5],
-    [-0.0001, 0.0001],
-    [-0.00001, -0.00001]
-]
+  - type: polynomial_baseline
+    enabled: False
+    signal_only: True
+    ratio: 0.0
+    param_ranges:
+      - [-1.0, 2.5]
+      - [0.1, 4.0]
+      - [-0.01, 0.01]
+      - [-0.001, -0.001]
 
-co2_params: [2300, 2400, 10, 0.0, 0.4, 30, 5, 6]
+  - type: polynomial_baseline
+    enabled: False
+    background_only: True
+    ratio: 0.0
+    param_ranges:
+      - [-2.0, 2.0]
+      - [0.01, 2.5]
+      - [-0.0001, 0.0001]
+      - [-0.00001, -0.00001]
 
-max_noise_level: 0.05
-theta_min: 0.2
-theta_max: 0.45
-n0_min: 1.25
-n0_max: 1.65
-r_min: 2.0
-r_max: 16.0
-n_imag_min: 1e-5
-n_imag_max: 1e-2
-h_min: 1.
-h_max: 1.5
-scale_min: 2.5
-scale_max: 4.5
+  - type: noise
+    enabled: False
+    ratio: 0.0
+    max_level: 0.05
+
+  - type: co2_peaks
+    enabled: False
+    ratio: 0.0
+    params: [2300, 2400, 10, 0.0, 0.4, 30, 5, 6]

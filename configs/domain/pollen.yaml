@@ -5,4 +5,4 @@ defaults:
   - /domain/pollen/inference: default
 
 mlflow:
-  experiment_name: "microplastics_pollen_raw"
+  experiment_name: "pollen_full_augmentation"

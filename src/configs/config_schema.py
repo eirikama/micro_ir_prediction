@@ -23,8 +23,9 @@ class TrainerConfig:
     val_every_n_epochs: int = 5
     log_every_n_epochs: int = 5
     precision: str = "16-mixed"
-    accelerator: str =  "gpu"
+    accelerator: str = "gpu"
     devices: int = 1
+    gradient_clip_val: float = 1.0
 
 @dataclass
 class InferenceConfig:
@@ -54,7 +55,7 @@ class DataConfig:
     include_bkg_pixels: bool = True
     z_normalize: bool = True
     augment_train: bool = True
-    augment_val: bool = True
+    augment_val: bool = False
 
     modality: str = "ir"
     augmentations: list = field(default_factory=list)
