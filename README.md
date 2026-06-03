@@ -142,6 +142,10 @@ wget https://www.sqlite.org/2024/sqlite-autoconf-3450200.tar.gz -P docker/
 # set your project directory
 echo 'PROJECT_DIR=/path/to/micro_ir_prediction' > .env
 
+# pre-create output directories as your own user
+# (if Docker creates them it does so as root, making them hard to inspect)
+mkdir -p outputs checkpoints mlruns multirun sweeps
+
 # build image (compiles Cython extensions inside the container)
 docker compose build
 ```
@@ -271,6 +275,7 @@ docker compose up jupyter -d
 
 ```
 Source port 5000 → localhost:5000   (MLflow UI)
+Source port 8080 → localhost:8080   (Optuna Dashboard)
 Source port 8888 → localhost:8888   (Jupyter)
 ```
 
@@ -297,20 +302,42 @@ pip install hydra-optuna-sweeper hydra-submitit-launcher
 ### Run a sweep locally
 
 ```bash
+<<<<<<< HEAD
 # convenience wrapper (100 trials from sweep config):
 python sweep.py --domain microplastic
 
 # with SQLite persistence (can resume after interruption):
 python sweep.py --domain microplastic --storage sqlite:///bacteria_sweep.db
 
+=======
+# 100 trials — saves to ./bacteria_sweep.db automatically:
+python sweep.py --domain bacteria
+
+>>>>>>> 8913ed0 (update docker compose for optuna)
 # override number of trials:
 python sweep.py --domain microplastic --n-trials 50
+
+# custom storage path (e.g. on a shared scratch disk):
+python sweep.py --domain bacteria --storage sqlite:////scratch/user/bacteria_sweep.db
 
 # equivalent raw Hydra command:
 python main.py --multirun domain=microplastic hydra/sweeper=optuna_bacteria mode=train
 ```
 
-### Inspect results
+### Inspect results — Optuna Dashboard
+
+```bash
+# in Docker (point SWEEP_DB at whichever domain you want):
+SWEEP_DB=bacteria_sweep.db docker compose up optuna-dashboard
+# → http://localhost:8080
+
+# or run directly without Docker:
+optuna-dashboard sqlite:///bacteria_sweep.db
+```
+
+The dashboard shows trial history, parameter importance, parallel coordinate plots, and contour plots — and updates live while a sweep is still running.
+
+For programmatic access:
 
 ```python
 import optuna

@@ -9,14 +9,14 @@ Requirements (install once):
 
 Usage
 -----
-  # Local sweep (sequential, 100 trials from sweep config):
+  # Local sweep — saves to bacteria_sweep.db automatically:
   python sweep.py --domain bacteria
 
   # Override number of trials:
   python sweep.py --domain microplastic --n-trials 50
 
-  # Persist results to SQLite (allows resuming and parallel workers):
-  python sweep.py --domain mlrod --storage sqlite:///mlrod_sweep.db
+  # Custom storage path (default is ./<domain>_sweep.db):
+  python sweep.py --domain mlrod --storage sqlite:////scratch/user/mlrod_sweep.db
 
   # SLURM: one job per trial — set your partition name:
   python sweep.py --domain bacteria --slurm --partition gpu
@@ -49,7 +49,7 @@ def main() -> None:
     parser.add_argument("--n-trials",   type=int,   default=None,
                         help="Override n_trials from sweeper config")
     parser.add_argument("--storage",    default=None,
-                        help="Optuna storage URL, e.g. sqlite:///sweep.db")
+                        help="Optuna storage URL (default: sqlite:///<domain>_sweep.db)")
     parser.add_argument("--study-name", default=None,
                         help="Override study name")
     parser.add_argument("--n-jobs",     type=int,   default=None,
@@ -65,6 +65,13 @@ def main() -> None:
     if args.slurm and not args.partition:
         parser.error("--partition is required when using --slurm")
 
+    # Default to the sweeps/ directory so the file is on the persisted volume
+    # inside Docker and readable by the optuna-dashboard service.
+    import os
+    sweeps_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sweeps")
+    os.makedirs(sweeps_dir, exist_ok=True)
+    storage = args.storage or f"sqlite:///{sweeps_dir}/{args.domain}_sweep.db"
+
     cmd = [
         sys.executable, "main.py",
         "--multirun",
@@ -75,8 +82,7 @@ def main() -> None:
 
     if args.n_trials is not None:
         cmd.append(f"hydra.sweeper.n_trials={args.n_trials}")
-    if args.storage is not None:
-        cmd.append(f"hydra.sweeper.storage={args.storage!r}")
+    cmd.append(f"hydra.sweeper.storage={storage!r}")
     if args.study_name is not None:
         cmd.append(f"hydra.sweeper.study_name={args.study_name}")
     if args.n_jobs is not None:

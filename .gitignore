@@ -23,6 +23,8 @@ lightning_logs/
 # hydra outputs
 outputs/
 multirun/
+!outputs/.gitkeep
+!multirun/.gitkeep
 
 # mlflow
 mlruns/
@@ -39,3 +41,8 @@ mlflow.db
 mlflow.db-shm
 mlflow.db-wal
 mlruns/
+
+# optuna sweep databases
+sweeps/*.db
+sweeps/*.db-shm
+sweeps/*.db-wal
