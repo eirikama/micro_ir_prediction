@@ -302,18 +302,9 @@ pip install hydra-optuna-sweeper hydra-submitit-launcher
 ### Run a sweep locally
 
 ```bash
-<<<<<<< HEAD
 # convenience wrapper (100 trials from sweep config):
 python sweep.py --domain microplastic
 
-# with SQLite persistence (can resume after interruption):
-python sweep.py --domain microplastic --storage sqlite:///bacteria_sweep.db
-
-=======
-# 100 trials — saves to ./bacteria_sweep.db automatically:
-python sweep.py --domain bacteria
-
->>>>>>> 8913ed0 (update docker compose for optuna)
 # override number of trials:
 python sweep.py --domain microplastic --n-trials 50
 
