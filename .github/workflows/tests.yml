@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── checkout ────────────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── Python ──────────────────────────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # ── CPU-only PyTorch (avoids the 2 GB CUDA download) ─────────────────
+      - name: Install CPU PyTorch
+        run: |
+          pip install torch torchvision \
+            --index-url https://download.pytorch.org/whl/cpu
+
+      # ── project dependencies ────────────────────────────────────────────────
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-timeout
+
+      # ── compile Cython physics extensions ──────────────────────────────────
+      # Failures here are non-fatal: the Mie-scattering tests auto-skip when
+      # the extensions are absent (see test_augmentation.py).
+      - name: Build Cython extensions
+        run: |
+          cd src/physics/sphere   && python setup_sphere_mie.py build_ext --inplace && cd ../../..
+          cd src/physics/cylinder && python setup_bessel.py    build_ext --inplace && cd ../../..
+        continue-on-error: true
+
+      # ── run tests ───────────────────────────────────────────────────────────
+      # HYDRA_FULL_ERROR=1 prints the full traceback when a config fails to load.
+      # hydra.compose (used in test_configs.py) is Hydra's testing API and does
+      # NOT write output directories, so no special cleanup is needed.
+      - name: Run tests
+        env:
+          HYDRA_FULL_ERROR: "1"
+        run: |
+          pytest tests/ \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            -v
+
+      # ── upload coverage to Codecov (optional — free for public repos) ───────
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

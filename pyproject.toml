@@ -20,5 +20,23 @@ known-first-party = ["src"]
 quote-style = "double"
 indent-style = "space"
 
+[tool.pytest.ini_options]
+testpaths    = ["tests"]
+addopts      = "-v --tb=short"
+timeout      = 120   # seconds — any single test hanging longer than this fails
+# Markers used in the test suite
+markers = [
+    "slow: marks tests that take more than a few seconds",
+    "gpu:  marks tests that require a CUDA-capable GPU",
+]
+
+[tool.coverage.run]
+source  = ["src"]
+omit    = ["src/physics/*"]   # generated Cython C files skew coverage
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
 [tool.cython-lint]
 ignore = ["E501"]

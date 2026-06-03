@@ -15,8 +15,14 @@ for _alias, _target in [
     if not hasattr(np, _alias):
         setattr(np, _alias, _target)
 
-from src.physics.sphere.sphere_mie import q_ext_sca_na
-from src.physics.cylinder.cylinder_mie import cyl_q_ext_sca_na
+try:
+    from src.physics.sphere.sphere_mie import q_ext_sca_na
+    from src.physics.cylinder.cylinder_mie import cyl_q_ext_sca_na
+    _MIE_AVAILABLE = True
+except ImportError:
+    q_ext_sca_na = None          # type: ignore[assignment]
+    cyl_q_ext_sca_na = None      # type: ignore[assignment]
+    _MIE_AVAILABLE = False
 
 
 # ===========================================================================
@@ -468,6 +474,12 @@ def make_schedule(
 # ===========================================================================
 
 def _apply_mie_scattering(s: np.ndarray, mask: np.ndarray, wn: np.ndarray, cfg) -> np.ndarray:
+    if not _MIE_AVAILABLE:
+        raise ImportError(
+            "Mie scattering requires compiled Cython extensions.\n"
+            "Run:  cd src/physics/sphere  && python setup_sphere_mie.py build_ext --inplace\n"
+            "      cd src/physics/cylinder && python setup_bessel.py    build_ext --inplace"
+        )
     s_subset = s[mask].copy()
     s_subset -= s_subset.min(axis=1, keepdims=True)
     s_subset /= s_subset.max(axis=1, keepdims=True) + 1e-9

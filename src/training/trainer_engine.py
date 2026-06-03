@@ -29,16 +29,22 @@ def run_training(
         verbose=False,
         mode="max",
     )
+    # Guard: steps_per_epoch can be 0 when the dataset is tiny (e.g. small
+    # spectra_per_class with many classes).  PL raises on limit_train_batches=0
+    # and log_every_n_steps=0, so we clamp to at least 1.
+    steps = max(1, datamodule.steps_per_epoch)
+
     trainer = pl.Trainer(
         min_epochs=cfg.trainer.min_epochs,
         max_epochs=max(cfg.trainer.max_epochs, cfg.trainer.min_epochs),
         accelerator=cfg.trainer.accelerator,
         devices=cfg.trainer.devices,
         precision=cfg.trainer.precision,
+        gradient_clip_val=cfg.trainer.gradient_clip_val,
         callbacks=[checkpoint_callback, early_stop, ExtendedLogger()],
-        limit_train_batches=datamodule.steps_per_epoch,
-        limit_val_batches=10,                            #datamodule.val_batches,
-        log_every_n_steps=datamodule.steps_per_epoch,
+        limit_train_batches=steps,
+        limit_val_batches=10,
+        log_every_n_steps=steps,
         check_val_every_n_epoch=cfg.trainer.val_every_n_epochs,
         enable_progress_bar=False,
         enable_model_summary=False,
