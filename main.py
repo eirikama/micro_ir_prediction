@@ -13,7 +13,6 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.configs.config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
 from src.data.datamodule import SpectralDataModule
-from src.data.augmentation import _apply_fluorescence
 from src.data.sampling import create_experiment_split, get_test_split
 from src.pipeline.train_pipeline import run_training_pipeline
 from src.pipeline.infer_pipeline import run_inference_pipeline
@@ -30,7 +29,7 @@ cs.store(group="inference", name="inference_config", node=InferenceConfig)
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
-def main(cfg: DictConfig) -> None:
+def main(cfg: DictConfig) -> float | None:
     setup_git()
     silence_warnings()
     pl.seed_everything(cfg.seed)
@@ -53,29 +52,19 @@ def main(cfg: DictConfig) -> None:
     datamodule.setup()
     label_encoding = datamodule.label_encoding
 
-    # ── fluorescence fitting (Raman domains) ─────────────────────────────────
-    aug_list = list(cfg.data.get("augmentations", None) or [])
-
-    if (cfg.data.augment_train or cfg.data.augment_val) and aug_list:
-        for aug_cfg in aug_list:
-            aug_name = aug_cfg.get("type") or aug_cfg.get("name")
-            if aug_name == "fluorescence" and aug_cfg.get("enabled", True):
-                print(f"[fluorescence] fitting on {datamodule.spectra.shape[0]} spectra", flush=True)
-                _apply_fluorescence.fit(datamodule.wn, datamodule.spectra, aug_cfg)
-                print("[fluorescence] fit complete", flush=True)
-                break
-
     # ── augmentation summary (used for trial IDs and artifact logging) ────────
-    aug_summary_raw = OmegaConf.to_container(cfg.data.augmentations, resolve=True) if aug_list else []
-    aug_summary_dict: dict = {}
-    for aug_cfg in aug_summary_raw:
-        aug_name = aug_cfg.pop("type", None) or aug_cfg.pop("name", None)
-        aug_summary_dict[aug_name] = aug_cfg
+    # Fluorescence fitting now happens inside datamodule.setup().
+    aug_map = OmegaConf.to_container(cfg.data.get("augmentations") or {}, resolve=True)
+    aug_summary_dict: dict = dict(aug_map)
     aug_summary_dict["augment_train"] = cfg.data.augment_train
     aug_summary_dict["augment_val"]   = cfg.data.augment_val
 
-    if cfg.data.augment_train and aug_list:
-        enabled = [a.get("type") for a in aug_list if a.get("enabled", True)]
+    if cfg.data.augment_train and aug_map:
+        enabled = [
+            aug_cfg.get("type", name)
+            for name, aug_cfg in aug_map.items()
+            if aug_cfg.get("enabled", True)
+        ]
         aug_tag = "+".join(sorted(enabled)) if enabled else "none"
     else:
         aug_tag = "none"
@@ -138,9 +127,11 @@ def main(cfg: DictConfig) -> None:
         tracker.log_dict(label_encoding, "label_encoding.json")
         tracker.log_text(OmegaConf.to_yaml(cfg), "hydra_config.yaml")
 
+        best_val_acc = None
+
         # ── train ─────────────────────────────────────────────────────────────
         if cfg.mode in ["train", "all"]:
-            best_path = run_training_pipeline(cfg, datamodule, tracker)
+            best_path, best_val_acc = run_training_pipeline(cfg, datamodule, tracker)
             with open_dict(cfg):
                 cfg.inference.ckpt_path = best_path
 
@@ -149,6 +140,8 @@ def main(cfg: DictConfig) -> None:
             if not cfg.inference.ckpt_path:
                 raise ValueError("ckpt_path must be set to run inference.")
             run_inference_pipeline(cfg, test_images, label_encoding, aug_summary_dict, tracker)
+
+    return best_val_acc  # used by Hydra Optuna Sweeper as the objective value
 
 
 if __name__ == "__main__":

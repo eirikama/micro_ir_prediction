@@ -14,7 +14,7 @@ def data_cfg():
     return OmegaConf.create({
         "batch_size":        N_CLASSES * 4,   # divisible by N_CLASSES
         "include_bkg_pixels": False,
-        "augmentations":     [],
+        "augmentations":     {},
         "z_normalize":       False,
         "augment_train":     False,
         "augment_val":       False,

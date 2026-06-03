@@ -1,0 +1,39 @@
+_target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+storage: null
+study_name: pollen_augmentation_sweep
+n_trials: 100
+n_jobs: 1
+direction: maximize
+
+sampler:
+  _target_: optuna.samplers.TPESampler
+  seed: 42
+
+params:
+  # ── training / optimiser ──────────────────────────────────────────────────
+  model.lr: tag(log, interval(5e-6, 5e-4))
+  model.weight_decay: tag(log, interval(1e-4, 1e-2))
+  data.batch_size: choice(32, 64, 128)
+
+  # ── model architecture ────────────────────────────────────────────────────
+  model.conv_channels: choice(16, 32, 64)
+  model.kernel_size: choice(7, 11, 21)
+  model.pred_dropout: interval(0.0, 0.5)
+  model.gamma: interval(0.0, 3.0)
+
+  # ── augmentation: Mie scattering (disabled in base — sweep whether it helps)
+  data.augmentations.mie_scattering.enabled: choice(true, false)
+  data.augmentations.mie_scattering.ratio: interval(0.1, 0.9)
+  data.augmentations.mie_scattering.r_min: interval(1.0, 5.0)
+  data.augmentations.mie_scattering.r_max: interval(8.0, 20.0)
+  data.augmentations.mie_scattering.n_imag_max: tag(log, interval(1e-4, 1e-1))
+  data.augmentations.mie_scattering.scale_max: interval(2.0, 6.0)
+
+  # ── augmentation: polynomial baseline — signal (disabled in base) ─────────
+  data.augmentations.polynomial_baseline_signal.enabled: choice(true, false)
+  data.augmentations.polynomial_baseline_signal.ratio: interval(0.2, 0.9)
+
+  # ── augmentation: white noise (disabled in base) ──────────────────────────
+  data.augmentations.noise.enabled: choice(true, false)
+  data.augmentations.noise.ratio: interval(0.1, 0.9)
+  data.augmentations.noise.max_level: tag(log, interval(1e-4, 0.1))

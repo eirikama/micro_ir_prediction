@@ -527,10 +527,12 @@ def _apply_co2_peaks(s: np.ndarray, mask: np.ndarray, wn: np.ndarray, cfg) -> np
 
 def _apply_cosmic_rays(s: np.ndarray, mask: np.ndarray, wn: np.ndarray, cfg) -> np.ndarray:
     x = torch.from_numpy(s[mask]).float()
+    amp_min = float(cfg.get("amplitude_min", cfg.get("amplitude_range", [3.0, 15.0])[0]))
+    amp_max = float(cfg.get("amplitude_max", cfg.get("amplitude_range", [3.0, 15.0])[1]))
     x_aug = augment_cosmic_rays(
         x,
         spike_rate=cfg.get("spike_rate", 0.002),
-        amplitude_range=tuple(cfg.get("amplitude_range", [3.0, 15.0])),
+        amplitude_range=(amp_min, amp_max),
         max_width=int(cfg.get("max_width", 3)),
     )
     s[mask] = x_aug.numpy()
@@ -569,8 +571,10 @@ class _FluorescenceAugWrapper:
                 "FluorescenceAugWrapper.fit() must be called with the full "
                 "training set before augmentation can run."
             )
-        aug             = self._cache[key]
-        amplitude_range = tuple(cfg.get("amplitude_range", [0.0, 0.25]))
+        aug     = self._cache[key]
+        amp_min = float(cfg.get("amplitude_min", cfg.get("amplitude_range", [0.0, 0.25])[0]))
+        amp_max = float(cfg.get("amplitude_max", cfg.get("amplitude_range", [0.0, 0.25])[1]))
+        amplitude_range = (amp_min, amp_max)
         s_t             = torch.from_numpy(s[mask]).float()
         x_aug           = aug(s_t, amplitude_range=amplitude_range)
 

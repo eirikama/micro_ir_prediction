@@ -19,11 +19,11 @@ def run_training_pipeline(
     cfg: DictConfig,
     datamodule,
     tracker: Tracker,
-) -> str:
+) -> tuple[str, float]:
     """Build, train, and log the model.
 
-    Returns the path to the best checkpoint so main.py can pass it to
-    the inference pipeline.
+    Returns ``(best_checkpoint_path, best_val_acc)`` so callers can both
+    continue to inference and report the score to a hyperparameter sweeper.
     """
     model = AACNN(cfg.model)
 
@@ -57,4 +57,4 @@ def run_training_pipeline(
     torch.cuda.empty_cache()
     gc.collect()
 
-    return best_path
+    return best_path, best_score

@@ -19,22 +19,24 @@ augment_val: True
 
 modality: raman
 augmentations:
-  - type: cosmic_rays
+  cosmic_rays:
     enabled: False
     ratio: 0.5
     spike_rate: 0.0002
-    amplitude_range: [2.0, 5.0]
+    amplitude_min: 2.0
+    amplitude_max: 5.0
     max_width: 3
 
-  - type: fluorescence
+  fluorescence:
     enabled: True
     signal_only: True
     ratio: 0.5
     n_components: 5
     poly_degree: 3
-    amplitude_range: [0.0, 0.05]
+    amplitude_min: 0.0
+    amplitude_max: 0.05
 
-  - type: shot_noise
+  shot_noise:
     enabled: True
     ratio: 0.5
     scale: 0.005

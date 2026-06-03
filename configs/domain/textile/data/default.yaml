@@ -18,7 +18,7 @@ augment_val: False
 
 modality: ir
 augmentations:
-  - type: mie_scattering
+  mie_scattering:
     enabled: True
     signal_only: True
     ratio: 0.5
@@ -36,7 +36,8 @@ augmentations:
     theta_min: 0.2
     theta_max: 0.45
 
-  - type: polynomial_baseline
+  polynomial_baseline_signal:
+    type: polynomial_baseline
     enabled: True
     signal_only: True
     ratio: 0.6
@@ -46,7 +47,8 @@ augmentations:
       - [-0.01, 0.01]
       - [-0.001, -0.001]
 
-  - type: polynomial_baseline
+  polynomial_baseline_background:
+    type: polynomial_baseline
     enabled: True
     background_only: True
     ratio: 0.6
@@ -56,12 +58,12 @@ augmentations:
       - [-0.0001, 0.0001]
       - [-0.00001, -0.00001]
 
-  - type: noise
+  noise:
     enabled: True
     ratio: 0.5
     max_level: 0.01
 
-  - type: co2_peaks
+  co2_peaks:
     enabled: False
     ratio: 0.2
     params: [2300, 2400, 10, 0.0, 0.4, 30, 5, 6]

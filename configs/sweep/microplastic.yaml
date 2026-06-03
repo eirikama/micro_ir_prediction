@@ -1,0 +1,104 @@
+# Hyperparameter sweep config for the microplastic (IR/FTIR) domain.
+#
+# Augmentation TYPES are fixed (from configs/domain/microplastic/data/default.yaml).
+# Only numerical parameters are swept here.
+#
+# Augmentation list disambiguation:
+#   augmentation.polynomial_baseline[0]  →  signal_only entry
+#   augmentation.polynomial_baseline[1]  →  background_only entry
+#
+# Run:
+#   python sweep.py --domain microplastic
+#   python sweep.py --domain microplastic --n-trials 100 --storage sqlite:///microplastic_sweep.db
+
+study:
+  name: microplastic_augmentation_sweep
+  direction: maximize
+  n_trials: 100
+
+base_overrides: {}
+
+params:
+  # ── training / optimiser ──────────────────────────────────────────────────
+  model.lr:
+    suggest: float_log
+    low: 5.0e-6
+    high: 5.0e-4
+
+  model.weight_decay:
+    suggest: float_log
+    low: 1.0e-4
+    high: 1.0e-2
+
+  data.batch_size:
+    suggest: categorical
+    choices: [32, 64, 128]
+
+  # ── model architecture ────────────────────────────────────────────────────
+  model.conv_channels:
+    suggest: categorical
+    choices: [16, 32, 64]
+
+  model.kernel_size:
+    suggest: categorical
+    choices: [7, 11, 21]
+
+  model.pred_dropout:
+    suggest: float
+    low: 0.0
+    high: 0.5
+
+  model.gamma:
+    suggest: float
+    low: 0.0
+    high: 3.0
+
+  # ── augmentation parameters ───────────────────────────────────────────────
+  # Mie scattering  (signal spectra)
+  augmentation.mie_scattering.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.mie_scattering.r_min:
+    suggest: float
+    low: 1.0
+    high: 5.0
+
+  augmentation.mie_scattering.r_max:
+    suggest: float
+    low: 10.0
+    high: 25.0
+
+  augmentation.mie_scattering.n_imag_max:
+    suggest: float_log
+    low: 1.0e-3
+    high: 5.0e-1
+
+  augmentation.mie_scattering.scale_max:
+    suggest: float
+    low: 3.0
+    high: 8.0
+
+  # Polynomial baseline — signal (signal_only entry)
+  augmentation.polynomial_baseline[0].ratio:
+    suggest: float
+    low: 0.2
+    high: 0.9
+
+  # Polynomial baseline — background (background_only entry)
+  augmentation.polynomial_baseline[1].ratio:
+    suggest: float
+    low: 0.2
+    high: 0.9
+
+  # White noise
+  augmentation.noise.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.noise.max_level:
+    suggest: float_log
+    low: 1.0e-4
+    high: 0.05

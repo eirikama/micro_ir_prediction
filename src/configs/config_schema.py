@@ -58,7 +58,7 @@ class DataConfig:
     augment_val: bool = False
 
     modality: str = "ir"
-    augmentations: list = field(default_factory=list)
+    augmentations: dict = field(default_factory=dict)
 
 @dataclass
 class MasterConfig:

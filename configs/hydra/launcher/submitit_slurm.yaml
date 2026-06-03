@@ -1,0 +1,19 @@
+_target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
+
+# ── Job resources ─────────────────────────────────────────────────────────────
+timeout_min: 180        # wall time per trial (3 hours)
+gpus_per_node: 1
+tasks_per_node: 1
+cpus_per_task: 4
+mem_gb: 32
+nodes: 1
+
+# ── SLURM metadata ────────────────────────────────────────────────────────────
+name: ${hydra.job.name}
+partition: ???          # override on command line: hydra.launcher.partition=gpu
+
+# ── Optional: uncomment and adjust for your cluster ──────────────────────────
+# account: myproject
+# qos: normal
+# constraint: v100
+# exclude: bad_node01

@@ -1,0 +1,90 @@
+# Hyperparameter sweep config for the mlrod (Raman) domain.
+#
+# Augmentation TYPES are fixed (from configs/domain/mlrod/data/default.yaml).
+# Only numerical parameters are swept here.
+#
+# Run:
+#   python sweep.py --domain mlrod
+#   python sweep.py --domain mlrod --n-trials 100 --storage sqlite:///mlrod_sweep.db
+
+study:
+  name: mlrod_augmentation_sweep
+  direction: maximize
+  n_trials: 100
+
+base_overrides: {}
+
+params:
+  # ── training / optimiser ──────────────────────────────────────────────────
+  model.lr:
+    suggest: float_log
+    low: 5.0e-6
+    high: 5.0e-4
+
+  model.weight_decay:
+    suggest: float_log
+    low: 1.0e-4
+    high: 1.0e-2
+
+  data.batch_size:
+    suggest: categorical
+    choices: [32, 64, 128]
+
+  # ── model architecture ────────────────────────────────────────────────────
+  model.conv_channels:
+    suggest: categorical
+    choices: [16, 32, 64]
+
+  model.kernel_size:
+    suggest: categorical
+    choices: [7, 11, 21]
+
+  model.pred_dropout:
+    suggest: float
+    low: 0.0
+    high: 0.5
+
+  model.gamma:
+    suggest: float
+    low: 0.0
+    high: 3.0
+
+  # ── augmentation parameters ───────────────────────────────────────────────
+  augmentation.fluorescence.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.fluorescence.amplitude_range[1]:
+    suggest: float_log
+    low: 0.005
+    high: 0.2
+
+  augmentation.shot_noise.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.shot_noise.scale:
+    suggest: float_log
+    low: 0.001
+    high: 0.1
+
+  augmentation.cosmic_rays.enabled:
+    suggest: categorical
+    choices: [true, false]
+
+  augmentation.cosmic_rays.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.cosmic_rays.spike_rate:
+    suggest: float_log
+    low: 5.0e-5
+    high: 5.0e-3
+
+  augmentation.cosmic_rays.amplitude_range[1]:    # max spike amplitude
+    suggest: float
+    low: 5.0
+    high: 20.0

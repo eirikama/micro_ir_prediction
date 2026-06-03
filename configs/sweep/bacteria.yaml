@@ -1,0 +1,111 @@
+# Hyperparameter sweep config for the bacteria (Raman) domain.
+#
+# Run:
+#   python sweep.py --domain bacteria --n-trials 100
+#   python sweep.py --domain bacteria --n-trials 100 --storage sqlite:///bacteria_sweep.db
+#
+# Augmentation TYPES are fixed (from configs/domain/bacteria/data/default.yaml).
+# Only numerical parameters are swept here.
+# Reference augmentations by their `type` key, never by list index.
+
+study:
+  name: bacteria_augmentation_sweep
+  direction: maximize       # maximize val_acc
+  n_trials: 100
+  # storage: null           # in-memory (lost when process ends)
+  # storage: sqlite:///bacteria_sweep.db   # persists; enables resuming & parallelism
+
+# Parameters applied to every trial BEFORE Optuna sampling.
+# Useful for fixing values you want to hold constant across the sweep
+# without removing them from the domain config.
+base_overrides: {}
+
+# ── Parameter search spaces ───────────────────────────────────────────────────
+#
+# suggest types:
+#   float      — uniform float in [low, high]
+#   float_log  — log-uniform float (good for lr, scales)
+#   int        — uniform integer in [low, high]
+#   categorical — one of `choices`
+#
+# Augmentation parameters:  augmentation.<type>.<param>
+# List element access:       augmentation.<type>.<param>[0]  or  [1]
+# ─────────────────────────────────────────────────────────────────────────────
+
+params:
+  # ── training / optimiser ──────────────────────────────────────────────────
+  model.lr:
+    suggest: float_log
+    low: 5.0e-6
+    high: 5.0e-4
+
+  model.weight_decay:
+    suggest: float_log
+    low: 1.0e-4
+    high: 1.0e-2
+
+  data.batch_size:
+    suggest: categorical
+    choices: [32, 64, 128]
+
+  # ── model architecture ────────────────────────────────────────────────────
+  model.conv_channels:
+    suggest: categorical
+    choices: [16, 32, 64]
+
+  model.kernel_size:
+    suggest: categorical
+    choices: [7, 11, 21]
+
+  model.pred_dropout:
+    suggest: float
+    low: 0.0
+    high: 0.5
+
+  model.gamma:
+    suggest: float
+    low: 0.0
+    high: 3.0
+
+  # ── augmentation parameters ───────────────────────────────────────────────
+  # fluorescence background  (enabled in base config)
+  augmentation.fluorescence.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.fluorescence.amplitude_range[1]:    # max amplitude (min stays 0.0)
+    suggest: float_log
+    low: 0.005
+    high: 0.3
+
+  # shot noise  (enabled in base config)
+  augmentation.shot_noise.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.shot_noise.scale:
+    suggest: float_log
+    low: 0.0005
+    high: 0.05
+
+  # cosmic ray spikes  (disabled in base config — sweep whether to enable them)
+  augmentation.cosmic_rays.enabled:
+    suggest: categorical
+    choices: [true, false]
+
+  augmentation.cosmic_rays.ratio:
+    suggest: float
+    low: 0.1
+    high: 0.9
+
+  augmentation.cosmic_rays.spike_rate:
+    suggest: float_log
+    low: 5.0e-5
+    high: 5.0e-3
+
+  augmentation.cosmic_rays.amplitude_range[1]:    # max spike amplitude
+    suggest: float
+    low: 2.0
+    high: 15.0

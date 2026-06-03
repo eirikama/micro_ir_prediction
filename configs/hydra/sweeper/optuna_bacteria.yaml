@@ -1,0 +1,36 @@
+_target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+storage: null
+study_name: bacteria_augmentation_sweep
+n_trials: 100
+n_jobs: 1
+direction: maximize
+
+sampler:
+  _target_: optuna.samplers.TPESampler
+  seed: 42
+
+params:
+  # ── training / optimiser ──────────────────────────────────────────────────
+  model.lr: tag(log, interval(5e-6, 5e-4))
+  model.weight_decay: tag(log, interval(1e-4, 1e-2))
+  data.batch_size: choice(32, 64, 128)
+
+  # ── model architecture ────────────────────────────────────────────────────
+  model.conv_channels: choice(16, 32, 64)
+  model.kernel_size: choice(7, 11, 21)
+  model.pred_dropout: interval(0.0, 0.5)
+  model.gamma: interval(0.0, 3.0)
+
+  # ── augmentation: fluorescence (enabled) ─────────────────────────────────
+  data.augmentations.fluorescence.ratio: interval(0.1, 0.9)
+  data.augmentations.fluorescence.amplitude_max: tag(log, interval(0.005, 0.3))
+
+  # ── augmentation: shot noise (enabled) ───────────────────────────────────
+  data.augmentations.shot_noise.ratio: interval(0.1, 0.9)
+  data.augmentations.shot_noise.scale: tag(log, interval(0.0005, 0.05))
+
+  # ── augmentation: cosmic rays (disabled in base — sweep whether to enable)
+  data.augmentations.cosmic_rays.enabled: choice(true, false)
+  data.augmentations.cosmic_rays.ratio: interval(0.1, 0.9)
+  data.augmentations.cosmic_rays.spike_rate: tag(log, interval(5e-5, 5e-3))
+  data.augmentations.cosmic_rays.amplitude_max: interval(2.0, 15.0)

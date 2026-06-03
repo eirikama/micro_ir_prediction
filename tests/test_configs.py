@@ -120,20 +120,21 @@ def test_val_split_size_in_range(domain_cfg):
 
 
 def test_augmentation_types_in_registry(domain_cfg):
-    """Every augmentation type listed in the config must exist in AUG_REGISTRY."""
+    """Every augmentation type in the config must exist in AUG_REGISTRY."""
     from src.data.augmentation import AUG_REGISTRY
-    aug_list = list(domain_cfg.data.get("augmentations") or [])
-    for aug in aug_list:
-        aug_type = aug.get("type")
+    aug_map = domain_cfg.data.get("augmentations") or {}
+    for aug_name, aug_cfg in aug_map.items():
+        aug_type = aug_cfg.get("type", aug_name)
         assert aug_type in AUG_REGISTRY, (
-            f"Augmentation type '{aug_type}' not found in AUG_REGISTRY. "
+            f"Augmentation '{aug_name}' has type '{aug_type}' not found in AUG_REGISTRY. "
             f"Known types: {sorted(AUG_REGISTRY.keys())}"
         )
 
 
 def test_raman_domains_have_z_normalize(domain_cfg):
     """Raman domains (fluorescence augmentation present) should have z_normalize set."""
-    aug_types = {a.get("type") for a in (domain_cfg.data.get("augmentations") or [])}
+    aug_map    = domain_cfg.data.get("augmentations") or {}
+    aug_types  = {aug_cfg.get("type", name) for name, aug_cfg in aug_map.items()}
     if "fluorescence" in aug_types or "cosmic_rays" in aug_types:
         # Raman domain — z_normalize must be explicitly configured
         assert hasattr(domain_cfg.data, "z_normalize"), (

@@ -1,14 +1,15 @@
+from __future__ import annotations
+
+import logging
 from typing import Iterator
-import numpy as np
-import zarr
-import random
-import pytorch_lightning as pl
-import torch
-from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader, IterableDataset
-from omegaconf import DictConfig
 
 import numpy as np
+import pytorch_lightning as pl
+import torch
+from omegaconf import DictConfig
+from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader, IterableDataset
+
 # Restore removed aliases for legacy Cython extensions (removed in NumPy 1.24)
 for _alias, _target in [
     ("complex", np.complex128),
@@ -19,8 +20,10 @@ for _alias, _target in [
     if not hasattr(np, _alias):
         setattr(np, _alias, _target)
 
-from src.data.augmentation import AUG_REGISTRY
+from src.data.augmentation import AUG_REGISTRY, _apply_fluorescence
 from src.data.sampling import create_experiment_split, get_training_data
+
+log = logging.getLogger(__name__)
 
 
 class SpectralDataset(IterableDataset):
@@ -76,22 +79,25 @@ class SpectralDataset(IterableDataset):
             if use_background:
                 is_signal = y != 0
             else:
-                is_signal = np.ones(B, dtype=bool)   # all samples treated as signal
+                is_signal = np.ones(B, dtype=bool)
 
-            for aug_cfg in self.cfg.augmentations:
-                if not aug_cfg.enabled:
+            aug_map = self.cfg.get("augmentations") or {}
+            for aug_name, aug_cfg in aug_map.items():
+                if not aug_cfg.get("enabled", True):
                     continue
+
+                aug_type = aug_cfg.get("type", aug_name)
 
                 if use_background and aug_cfg.get("signal_only", False):
                     base = is_signal
                 elif use_background and aug_cfg.get("background_only", False):
                     base = ~is_signal
                 else:
-                    base = np.ones(B, dtype=bool)    # no signal/background distinction
+                    base = np.ones(B, dtype=bool)
 
                 mask = base & (np.random.rand(B) < aug_cfg.ratio)
                 if mask.any():
-                    s = AUG_REGISTRY[aug_cfg.type](s, mask, self.wn, aug_cfg)
+                    s = AUG_REGISTRY[aug_type](s, mask, self.wn, aug_cfg)
 
         if self.cfg.z_normalize:
             mu = s.mean(axis=1, keepdims=True)
@@ -138,6 +144,17 @@ class SpectralDataModule(pl.LightningDataModule):
 
         self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.cfg, self.cfg.augment_train)
         self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg, self.cfg.augment_train and self.cfg.augment_val)
+
+        # Fit fluorescence PCA basis when that augmentation is enabled.
+        if self.cfg.augment_train or self.cfg.augment_val:
+            aug_map = self.cfg.get("augmentations") or {}
+            for aug_name, aug_cfg_item in aug_map.items():
+                aug_type = aug_cfg_item.get("type", aug_name)
+                if aug_type == "fluorescence" and aug_cfg_item.get("enabled", True):
+                    log.info("[fluorescence] fitting on %d spectra", self.spectra.shape[0])
+                    _apply_fluorescence.fit(self.wn, self.spectra, aug_cfg_item)
+                    log.info("[fluorescence] fit complete")
+                    break
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(self.train_ds, batch_size=None, pin_memory=False)
