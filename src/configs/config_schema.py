@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 @dataclass
 class ModelConfig:
@@ -58,7 +58,7 @@ class DataConfig:
     augment_val: bool = False
 
     modality: str = "ir"
-    augmentations: dict = field(default_factory=dict)
+    augmentations: Any = field(default_factory=dict)
 
 @dataclass
 class MasterConfig:

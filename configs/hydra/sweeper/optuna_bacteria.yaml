@@ -4,6 +4,8 @@ study_name: bacteria_augmentation_sweep
 n_trials: 100
 n_jobs: 1
 direction: maximize
+search_space: null
+custom_search_space: null
 
 sampler:
   _target_: optuna.samplers.TPESampler
@@ -27,10 +29,10 @@ params:
 
   # ── augmentation: shot noise (enabled) ───────────────────────────────────
   data.augmentations.shot_noise.ratio: interval(0.1, 0.9)
-  data.augmentations.shot_noise.scale: tag(log, interval(0.0005, 0.05))
+  data.augmentations.shot_noise.scale: tag(log, interval(0.00005, 0.05))
 
   # ── augmentation: cosmic rays (disabled in base — sweep whether to enable)
-  data.augmentations.cosmic_rays.enabled: choice(true, false)
-  data.augmentations.cosmic_rays.ratio: interval(0.1, 0.9)
-  data.augmentations.cosmic_rays.spike_rate: tag(log, interval(5e-5, 5e-3))
-  data.augmentations.cosmic_rays.amplitude_max: interval(2.0, 15.0)
+  # data.augmentations.cosmic_rays.enabled: choice(true, false)
+  # data.augmentations.cosmic_rays.ratio: interval(0.1, 0.9)
+  # data.augmentations.cosmic_rays.spike_rate: tag(log, interval(5e-5, 5e-3))
+  # data.augmentations.cosmic_rays.amplitude_max: interval(2.0, 15.0)

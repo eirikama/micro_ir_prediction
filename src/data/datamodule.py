@@ -102,7 +102,8 @@ class SpectralDataset(IterableDataset):
         if self.cfg.z_normalize:
             mu = s.mean(axis=1, keepdims=True)
             sigma = s.std(axis=1, keepdims=True)
-            s = (s - mu) / (sigma + 1e-8)
+            s = (s - mu) / np.maximum(sigma, 1e-3)
+            s = np.nan_to_num(s, nan=0.0, posinf=0.0, neginf=0.0)
 
         return torch.from_numpy(s).float().unsqueeze(1), torch.from_numpy(y).long()
 

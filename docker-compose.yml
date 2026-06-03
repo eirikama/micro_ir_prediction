@@ -1,32 +1,6 @@
 version: "3.8"
 
-# ── Shared volume blocks ───────────────────────────────────────────────────────
-# Kept as YAML anchors to avoid repetition across services.
-# All host paths are relative to PROJECT_DIR (set in .env).
-x-data-volumes: &data-volumes
-  - /mnt/ssd2:/mnt/ssd2:ro
-  - /mnt/ssd3:/mnt/ssd3:ro
-
-x-output-volumes: &output-volumes
-  - ${PROJECT_DIR}/outputs:/app/outputs          # predictions, raw outputs
-  - ${PROJECT_DIR}/checkpoints:/app/checkpoints  # best model checkpoints
-  - ${PROJECT_DIR}/mlruns:/app/mlruns            # MLflow artifact store
-  - ${PROJECT_DIR}/multirun:/app/multirun        # Hydra sweep trial outputs
-  - ${PROJECT_DIR}/sweeps:/app/sweeps            # Optuna .db files
-  - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db      # MLflow tracking database
-
-x-code-volumes: &code-volumes
-  - ${PROJECT_DIR}/.git:/app/.git:ro
-  - ${PROJECT_DIR}/main.py:/app/main.py
-  - ${PROJECT_DIR}/sweep.py:/app/sweep.py
-  - ${PROJECT_DIR}/configs:/app/configs
-  - ${PROJECT_DIR}/src/configs:/app/src/configs
-  - ${PROJECT_DIR}/src/data:/app/src/data
-  - ${PROJECT_DIR}/src/training:/app/src/training
-  - ${PROJECT_DIR}/src/inference:/app/src/inference
-  - ${PROJECT_DIR}/src/models:/app/src/models
-  - ${PROJECT_DIR}/src/utils.py:/app/src/utils.py
-
+# ── Reusable blocks (mappings only — YAML merge <<: works for dicts, not lists)
 x-gpu: &gpu
   deploy:
     resources:
@@ -40,6 +14,7 @@ x-base-env: &base-env
   - NVIDIA_VISIBLE_DEVICES=all
   - HYDRA_FULL_ERROR=1
   - LD_PRELOAD=/usr/local/lib/libsqlite3.so.0
+  - PYTHONPATH=/app
 
 services:
   train:
@@ -49,9 +24,29 @@ services:
     <<: *gpu
     environment: *base-env
     volumes:
-      - *data-volumes
-      - *output-volumes
-      - *code-volumes
+      # data (read-only)
+      - /mnt/ssd2:/mnt/ssd2:ro
+      - /mnt/ssd3:/mnt/ssd3:ro
+      # outputs
+      - ${PROJECT_DIR}/outputs:/app/outputs
+      - ${PROJECT_DIR}/checkpoints:/app/checkpoints
+      - ${PROJECT_DIR}/mlruns:/app/mlruns
+      - ${PROJECT_DIR}/multirun:/app/multirun
+      - ${PROJECT_DIR}/sweeps:/app/sweeps
+      - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
+      # code (live-editable without rebuild)
+      - ${PROJECT_DIR}/.git:/app/.git:ro
+      - ${PROJECT_DIR}/main.py:/app/main.py
+      - ${PROJECT_DIR}/sweep.py:/app/sweep.py
+      - ${PROJECT_DIR}/configs:/app/configs
+      - ${PROJECT_DIR}/src/configs:/app/src/configs
+      - ${PROJECT_DIR}/src/data:/app/src/data
+      - ${PROJECT_DIR}/src/pipeline:/app/src/pipeline
+      - ${PROJECT_DIR}/src/tracking:/app/src/tracking
+      - ${PROJECT_DIR}/src/training:/app/src/training
+      - ${PROJECT_DIR}/src/inference:/app/src/inference
+      - ${PROJECT_DIR}/src/models:/app/src/models
+      - ${PROJECT_DIR}/src/utils.py:/app/src/utils.py
     command: >
       python main.py
       mode=all
@@ -66,7 +61,7 @@ services:
       - LD_PRELOAD=/usr/local/lib/libsqlite3.so.0
     volumes:
       - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
-      - ${PROJECT_DIR}/mlruns:/app/mlruns        # artifacts must be visible here too
+      - ${PROJECT_DIR}/mlruns:/app/mlruns
     command: >
       mlflow ui
       --backend-store-uri sqlite:////app/mlflow.db
@@ -81,7 +76,7 @@ services:
     environment:
       - LD_PRELOAD=/usr/local/lib/libsqlite3.so.0
     volumes:
-      - ${PROJECT_DIR}/sweeps:/app/sweeps:ro
+      - ${PROJECT_DIR}/sweeps:/app/sweeps
     command: >
       optuna-dashboard
       --host 0.0.0.0
@@ -96,9 +91,27 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - *data-volumes
-      - *output-volumes
-      - *code-volumes
+      # data (read-only)
+      - /mnt/ssd2:/mnt/ssd2:ro
+      - /mnt/ssd3:/mnt/ssd3:ro
+      # outputs
+      - ${PROJECT_DIR}/outputs:/app/outputs
+      - ${PROJECT_DIR}/checkpoints:/app/checkpoints
+      - ${PROJECT_DIR}/mlruns:/app/mlruns
+      - ${PROJECT_DIR}/multirun:/app/multirun
+      - ${PROJECT_DIR}/sweeps:/app/sweeps
+      - ${PROJECT_DIR}/mlflow.db:/app/mlflow.db
+      # code
+      - ${PROJECT_DIR}/.git:/app/.git:ro
+      - ${PROJECT_DIR}/main.py:/app/main.py
+      - ${PROJECT_DIR}/sweep.py:/app/sweep.py
+      - ${PROJECT_DIR}/configs:/app/configs
+      - ${PROJECT_DIR}/src/configs:/app/src/configs
+      - ${PROJECT_DIR}/src/data:/app/src/data
+      - ${PROJECT_DIR}/src/training:/app/src/training
+      - ${PROJECT_DIR}/src/inference:/app/src/inference
+      - ${PROJECT_DIR}/src/models:/app/src/models
+      - ${PROJECT_DIR}/src/utils.py:/app/src/utils.py
     command: >
       jupyter lab
       --ip=0.0.0.0

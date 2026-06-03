@@ -33,6 +33,7 @@ RUN cd /tmp && \
     rm -rf /tmp/sqlite-autoconf-3450200*
 
 ENV LD_PRELOAD=/usr/local/lib/libsqlite3.so.0
+ENV PYTHONPATH=/app
 
 
 WORKDIR /app
@@ -50,6 +51,9 @@ RUN uv pip install --system --no-cache \
     --extra-index-url https://download.pytorch.org/whl/cu121 \
     --index-strategy unsafe-best-match \
     -r requirements.txt
+
+RUN uv pip install --system --no-cache --no-deps hydra-optuna-sweeper==1.2.0
+
 
 COPY src/physics/sphere /app/src/physics/sphere
 RUN cd /app/src/physics/sphere && python setup_sphere_mie.py build_ext --inplace

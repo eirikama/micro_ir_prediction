@@ -5,4 +5,4 @@ defaults:
   - /domain/bacteria/inference: default
 
 mlflow:
-  experiment_name: "bacteria_full_augmentation"
+  experiment_name: "bacteria"
