@@ -14,9 +14,9 @@ Deep learning pipeline for classification of spectral data and hyperspectral mic
 
 | Domain | Modality | Active augmentations |
 |---|---|---|
-| `microplastic` | IR (FTIR) | Mie scattering, polynomial baseline (signal + background), noise |
-| `textile` | IR (FTIR) | Mie scattering, polynomial baseline (signal + background), noise |
-| `pollen` | IR (FTIR) | None by default (all disabled; explore via sweep) |
+| `microplastic` | IR  | Mie scattering, polynomial baseline (signal + background), CO2, noise |
+| `textile` | IR  | Mie scattering, polynomial baseline (signal + background), CO2, noise |
+| `pollen` | NIR  | Cylindrical Mie scattering, polynomial baseline, noise |
 | `mlrod` | Raman | Cosmic ray spikes, fluorescence background (PCA-fitted), shot noise |
 | `bacteria` | Raman | Fluorescence background (PCA-fitted), shot noise |
 
@@ -74,8 +74,8 @@ micro_ir_prediction/
 │           (same layout for pollen/, textile/, mlrod/, bacteria/)
 │
 ├── slurm/
-│   ├── train.sh                         # single training job (Singularity)
-│   └── sweep.sh                         # parallel sweep job array (Singularity)
+│   ├── train.sh                         # single training job 
+│   └── sweep.sh                         # parallel sweep job array 
 │
 └── src/
     ├── configs/config_schema.py         # typed dataclass config definitions
@@ -132,7 +132,7 @@ micro_ir_prediction/
 
 ## Installation
 
-### Docker (recommended for local use)
+### Docker 
 
 ```bash
 # bundled SQLite for offline build (only needed once)
@@ -146,9 +146,9 @@ echo 'PROJECT_DIR=/path/to/micro_ir_prediction' > .env
 docker compose build
 ```
 
-### Local development (without Docker)
+### Local development 
 
-Requires Python 3.8+. Python 3.10+ recommended (available via `deadsnakes` PPA on Ubuntu or `conda`).
+Requires Python 3.8+. Python 3.10+ recommended
 
 ```bash
 python3.10 -m venv env
@@ -185,7 +185,7 @@ All parameters are controlled via Hydra. Select a domain with `domain=<name>`; a
 
 ### Augmentation config format
 
-Augmentations are configured as a **named dict** under `data.augmentations`, not a list. The key is the augmentation name used for Hydra overrides; if it differs from the registry key (e.g. `polynomial_baseline_signal`), a `type:` field specifies the registry dispatch name.
+Augmentations are configured as a **named dict** under `data.augmentations`. The key is the augmentation name used for Hydra overrides; if it differs from the registry key (e.g. `polynomial_baseline_signal`), a `type:` field specifies the registry dispatch name.
 
 ```yaml
 # configs/domain/bacteria/data/default.yaml
@@ -298,16 +298,16 @@ pip install hydra-optuna-sweeper hydra-submitit-launcher
 
 ```bash
 # convenience wrapper (100 trials from sweep config):
-python sweep.py --domain bacteria
+python sweep.py --domain microplastic
 
 # with SQLite persistence (can resume after interruption):
-python sweep.py --domain bacteria --storage sqlite:///bacteria_sweep.db
+python sweep.py --domain microplastic --storage sqlite:///bacteria_sweep.db
 
 # override number of trials:
 python sweep.py --domain microplastic --n-trials 50
 
 # equivalent raw Hydra command:
-python main.py --multirun domain=bacteria hydra/sweeper=optuna_bacteria mode=train
+python main.py --multirun domain=microplastic hydra/sweeper=optuna_bacteria mode=train
 ```
 
 ### Inspect results
@@ -316,7 +316,7 @@ python main.py --multirun domain=bacteria hydra/sweeper=optuna_bacteria mode=tra
 import optuna
 
 study = optuna.load_study(
-    study_name="bacteria_augmentation_sweep",
+    study_name="microplastic_augmentation_sweep",
     storage="sqlite:///bacteria_sweep.db",
 )
 print(f"Best val_acc: {study.best_value:.4f}")
@@ -339,7 +339,7 @@ params:
 
 ## Running on a cluster (SLURM + Singularity)
 
-HPC clusters do not support Docker (requires root). Use **Singularity/Apptainer** instead — it converts your Docker image with zero code changes.
+Use **Singularity/Apptainer** for HPC clusters. Convert Docker image to singularity.
 
 ### Build the Singularity image (one-time)
 
