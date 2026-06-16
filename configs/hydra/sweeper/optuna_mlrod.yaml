@@ -13,25 +13,24 @@ sampler:
 
 params:
   # ── training / optimiser ──────────────────────────────────────────────────
-  model.lr: tag(log, interval(5e-6, 5e-4))
-  model.weight_decay: tag(log, interval(1e-4, 1e-2))
-  data.batch_size: choice(32, 64, 128)
+  model.lr: tag(log, interval(5e-6, 5e-3))
+  model.weight_decay: tag(log, interval(1e-4, 1e-1))
+  data.batch_size: choice(8, 16, 32)
 
   # ── model architecture ────────────────────────────────────────────────────
   model.conv_channels: choice(16, 32, 64)
   model.kernel_size: choice(7, 11, 21)
   model.pred_dropout: interval(0.0, 0.5)
-  model.gamma: interval(0.0, 3.0)
 
   # ── augmentation: fluorescence (enabled) ─────────────────────────────────
   data.augmentations.fluorescence.ratio: interval(0.1, 0.9)
-  data.augmentations.fluorescence.amplitude_max: tag(log, interval(0.005, 0.3))
+  data.augmentations.fluorescence.amplitude_max: tag(log, interval(0.0005, 0.3))
 
   # ── augmentation: shot noise (enabled) ───────────────────────────────────
   data.augmentations.shot_noise.ratio: interval(0.1, 0.9)
-  data.augmentations.shot_noise.scale: tag(log, interval(0.001, 0.1))
+  data.augmentations.shot_noise.scale: tag(log, interval(0.0001, 0.1))
 
   # ── augmentation: cosmic rays (enabled) ──────────────────────────────────
   data.augmentations.cosmic_rays.ratio: interval(0.1, 0.9)
   data.augmentations.cosmic_rays.spike_rate: tag(log, interval(5e-5, 5e-3))
-  data.augmentations.cosmic_rays.amplitude_max: interval(5.0, 20.0)
+  data.augmentations.cosmic_rays.amplitude_max: interval(3.0, 20.0)

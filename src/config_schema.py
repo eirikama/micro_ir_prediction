@@ -43,6 +43,7 @@ class DataConfig:
     zarr_path: str = ""
     zarr_test_path: str = ""
     intrinsic_validation: bool = False
+    hyperspectra: bool = True
     spectra_per_class: int = 8
     sample_to_bkg_spectra_ratio: int = 2
     max_sampling_per_class_attempts: int = 1000
@@ -56,7 +57,7 @@ class DataConfig:
     z_normalize: bool = True
     augment_train: bool = True
     augment_val: bool = False
-
+    test_sample_ratio: float = 1.0
     modality: str = "ir"
     augmentations: Any = field(default_factory=dict)
 

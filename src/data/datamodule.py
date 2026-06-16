@@ -21,7 +21,7 @@ for _alias, _target in [
         setattr(np, _alias, _target)
 
 from src.data.augmentation import AUG_REGISTRY, _apply_fluorescence
-from src.data.sampling import create_experiment_split, get_training_data
+from src.data.sampling import create_experiment_split, get_training_data_spectra, get_training_data_hyperspectral
 
 log = logging.getLogger(__name__)
 
@@ -119,19 +119,31 @@ class SpectralDataModule(pl.LightningDataModule):
         self.steps_per_epoch = 0
 
     def setup(self, stage: str | None = None) -> None:
+        if self.train_ds is not None:
+            return
 
-        bkg_per_class = self.cfg.spectra_per_class // self.cfg.sample_to_bkg_spectra_ratio
-        label, spectra, wn, label_encoding = get_training_data(
-            split=self.split,
-            zarr_path=self.cfg.zarr_path,
-            spectra_per_class=self.cfg.spectra_per_class * 2,
-            bkg_per_class=bkg_per_class * 2,
-            patch_size=self.cfg.sampling_patch_size,
-            background_max=self.cfg.background_max,
-            sample_min=self.cfg.sample_min,
-            max_class_attempts=self.cfg.max_sampling_per_class_attempts,
-            include_bkg_pixels=self.cfg.include_bkg_pixels
-        )
+        if self.cfg.hyperspectra:
+
+            bkg_per_class = self.cfg.spectra_per_class // self.cfg.sample_to_bkg_spectra_ratio
+            label, spectra, wn, label_encoding = get_training_data_hyperspectral(
+                split=self.split,
+                zarr_path=self.cfg.zarr_path,
+                spectra_per_class=self.cfg.spectra_per_class * 2,
+                bkg_per_class=bkg_per_class * 2,
+                patch_size=self.cfg.sampling_patch_size,
+                background_max=self.cfg.background_max,
+                sample_min=self.cfg.sample_min,
+                max_class_attempts=self.cfg.max_sampling_per_class_attempts,
+                include_bkg_pixels=self.cfg.include_bkg_pixels
+            )
+        else:
+            label, spectra, wn, label_encoding = get_training_data_spectra(
+                split=self.split,
+                zarr_path=self.cfg.zarr_path,
+                spectra_per_class=self.cfg.spectra_per_class * 2,
+                # classes=["Normal epithelium", "Normal stroma",
+                #          "Cancerous epithelium", "Cancer-associated stroma"]
+            )
         self.wn = wn
         self.spectra = spectra
         self.label_encoding = label_encoding

@@ -25,8 +25,16 @@ def run_training_pipeline(
     Returns ``(best_checkpoint_path, best_val_acc)`` so callers can both
     continue to inference and report the score to a hyperparameter sweeper.
     """
-    model = AACNN(cfg.model)
+    n_data   = len(datamodule.label_encoding)
+    n_model  = cfg.model.num_classes
+    if n_model != n_data:
+        raise ValueError(
+            f"Model output head has {n_model} node(s) but the data has "
+            f"{n_data} classes {sorted(datamodule.label_encoding, key=datamodule.label_encoding.get)}. "
+            f"Set model.num_classes={n_data} in your config."
+        )
 
+    model = AACNN(cfg.model)
     tracker.log_params({
         "Model/n_params_trainable": sum(
             p.numel() for p in model.parameters() if p.requires_grad
@@ -36,9 +44,22 @@ def run_training_pipeline(
 
     log.info("Starting training…")
     t0 = time.time()
-    best_path, best_score, final_epoch, stopped_early = run_training(
-        cfg, model, datamodule, tracker.pl_logger()
-    )
+    try:
+        best_path, best_score, final_epoch, stopped_early = run_training(
+            cfg, model, datamodule, tracker.pl_logger()
+        )
+    except torch.cuda.OutOfMemoryError:
+        log.warning(
+            "CUDA OOM — batch_size=%d, conv_channels=%d. "
+            "Marking trial as failed and freeing memory.",
+            cfg.data.batch_size,
+            cfg.model.conv_channels,
+        )
+        del model
+        torch.cuda.empty_cache()
+        gc.collect()
+        raise
+
     train_seconds = time.time() - t0
     log.info("Training complete. Best checkpoint: %s", best_path)
 

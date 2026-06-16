@@ -35,9 +35,8 @@ def _chunk_for(H: int, W: int, max_mb: float = 8.0) -> tuple[int, int]:
             cw //= 2
     return (ch, cw)
 
-
 def save_inference_outputs_zarr(
-    prob_map: np.ndarray,  # (H, W, n_classes) float16
+    prob_map: np.ndarray,        # (H, W, n_classes) spatial  OR  (N, n_classes) flat
     image_name: str,
     store: zarr.Group,
     N: int,
@@ -48,7 +47,6 @@ def save_inference_outputs_zarr(
     aug_summary: dict | None = None,
     hparams: dict | None = None,
 ):
-
     aug_summary = aug_summary or {}
     if aug_summary.get("augment_train", False):
         enabled = sorted([
@@ -58,68 +56,121 @@ def save_inference_outputs_zarr(
         aug_tag = "+".join(enabled) if enabled else "aug_none"
     else:
         aug_tag = "raw"
-
     trial_id = f"N{N}_seed{seed:02d}_{aug_tag}"
 
-    H, W, n_classes = prob_map.shape
     compressor = zarr.Blosc(cname="lz4", clevel=3, shuffle=zarr.Blosc.BITSHUFFLE)
-    chunk_hw = _chunk_for(H, W)
-    chunk_hwk = (*chunk_hw, top_k_save)
+
+    # ── detect layout ─────────────────────────────────────────────────────────
+    # run_inference returns (H, W, n_classes) — for PCUK W=1 (faked cube)
+    # squeeze that to (N, n_classes) flat
+    is_flat = (prob_map.ndim == 3 and prob_map.shape[1] == 1) or prob_map.ndim == 2
+    if is_flat:
+        prob_map   = prob_map.reshape(-1, prob_map.shape[-1])  # (N, n_classes)
+        n_pixels, n_classes = prob_map.shape
+        _save_flat(
+            prob_map, image_name, store, trial_id,
+            true_idx, background_idx, top_k_save,
+            n_pixels, n_classes, compressor,
+            N, seed, aug_summary, hparams,
+        )
+    else:
+        H, W, n_classes = prob_map.shape
+        _save_spatial(
+            prob_map, image_name, store, trial_id,
+            true_idx, background_idx, top_k_save,
+            H, W, n_classes, compressor,
+            N, seed, aug_summary, hparams,
+        )
+
+
+def _save_spatial(
+    prob_map, image_name, store, trial_id,
+    true_idx, background_idx, top_k_save,
+    H, W, n_classes, compressor,
+    N, seed, aug_summary, hparams,
+):
+    """Original spatial save path — hyperspectral image (H, W, n_classes)."""
+    chunk_hw  = _chunk_for(H, W)
+    chunk_hwk = (*chunk_hw, min(top_k_save, n_classes))
 
     img_grp = store.require_group(f"{trial_id}/{image_name}")
-    img_grp.attrs.update(
-        {
-            "true_idx": true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
-            "N": N,
-            "seed": seed,
-            "trial_id": trial_id,
-            "background_idx": background_idx,
-            "n_classes": n_classes,
-            "top_k_saved": top_k_save,
-            "H": H,
-            "W": W,
-            "aug": aug_summary or {},
-            **(hparams or {}),
-        }
-    )
+    img_grp.attrs.update({
+        "true_idx":       true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
+        "N": N, "seed": seed, "trial_id": trial_id,
+        "background_idx": background_idx,
+        "n_classes":      n_classes,
+        "top_k_saved":    top_k_save,
+        "H": H, "W": W,
+        "layout":         "spatial",
+        "aug":            aug_summary or {},
+        **(hparams or {}),
+    })
 
-    img_grp.array(
-        "argmax_map",
+    img_grp.array("argmax_map",
         np.argmax(prob_map, axis=-1).astype(np.uint8),
-        dtype="u1",
-        overwrite=True,
-        chunks=chunk_hw,
-        compressor=compressor,
-    )
+        dtype="u1", overwrite=True, chunks=chunk_hw, compressor=compressor)
 
-    img_grp.array(
-        "bg_prob",
+    img_grp.array("bg_prob",
         prob_map[:, :, background_idx].astype(np.float16),
-        dtype="float16",
-        overwrite=True,
-        chunks=chunk_hw,
-        compressor=compressor,
-    )
+        dtype="float16", overwrite=True, chunks=chunk_hw, compressor=compressor)
 
-    top_k_save = min(top_k_save, n_classes)
-    flat = prob_map.reshape(-1, n_classes).astype(np.float32)
-    top_k_idx = np.argsort(flat, axis=-1)[:, -top_k_save:][:, ::-1]
+    top_k = min(top_k_save, n_classes)
+    flat      = prob_map.reshape(-1, n_classes).astype(np.float32)
+    top_k_idx  = np.argsort(flat, axis=-1)[:, -top_k:][:, ::-1]
     top_k_prob = flat[np.arange(flat.shape[0])[:, None], top_k_idx]
 
-    img_grp.array(
-        "top_k_classes",
-        top_k_idx.reshape(H, W, top_k_save).astype(np.uint8),
-        dtype="u1",
-        overwrite=True,
-        chunks=chunk_hwk,
-        compressor=compressor,
-    )
+    img_grp.array("top_k_classes",
+        top_k_idx.reshape(H, W, top_k).astype(np.uint8),
+        dtype="u1", overwrite=True, chunks=chunk_hwk, compressor=compressor)
 
-    img_grp.array(
-        "top_k_probs",
-        top_k_prob.reshape(H, W, top_k_save).astype(np.float16),
-        dtype="float16",
-        overwrite=True,
-        chunks=chunk_hwk,
-        compressor=compressor,
-    )
+    img_grp.array("top_k_probs",
+        top_k_prob.reshape(H, W, top_k).astype(np.float16),
+        dtype="float16", overwrite=True, chunks=chunk_hwk, compressor=compressor)
+
+
+def _save_flat(
+    prob_map, image_name, store, trial_id,
+    true_idx, background_idx, top_k_save,
+    n_pixels, n_classes, compressor,
+    N, seed, aug_summary, hparams,
+):
+    """Flat save path — annotated spectra (N, n_classes), e.g. PCUK cores."""
+    top_k = min(top_k_save, n_classes)
+    chunk  = (min(n_pixels, 4096),)
+    chunkk = (min(n_pixels, 4096), top_k)
+
+    img_grp = store.require_group(f"{trial_id}/{image_name}")
+    img_grp.attrs.update({
+        "true_idx":       true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
+        "N": N, "seed": seed, "trial_id": trial_id,
+        "background_idx": background_idx,
+        "n_classes":      n_classes,
+        "top_k_saved":    top_k,
+        "n_pixels":       n_pixels,
+        "layout":         "flat",
+        "aug":            aug_summary or {},
+        **(hparams or {}),
+    })
+
+    img_grp.array("argmax",
+        np.argmax(prob_map, axis=-1).astype(np.uint8),
+        dtype="u1", overwrite=True, chunks=chunk, compressor=compressor)
+
+    img_grp.array("bg_prob",
+        prob_map[:, background_idx].astype(np.float16),
+        dtype="float16", overwrite=True, chunks=chunk, compressor=compressor)
+
+    # true labels — only meaningful for flat layout where we have per-pixel GT
+    if isinstance(true_idx, np.ndarray):
+        img_grp.array("true_labels",
+            true_idx.astype(np.uint8),
+            dtype="u1", overwrite=True, chunks=chunk, compressor=compressor)
+
+    top_k_idx  = np.argsort(prob_map, axis=-1)[:, -top_k:][:, ::-1].astype(np.uint8)
+    top_k_prob = prob_map[np.arange(n_pixels)[:, None], top_k_idx].astype(np.float16)
+
+    img_grp.array("top_k_classes",
+        top_k_idx, dtype="u1", overwrite=True, chunks=chunkk, compressor=compressor)
+
+    img_grp.array("top_k_probs",
+        top_k_prob, dtype="float16", overwrite=True, chunks=chunkk, compressor=compressor)

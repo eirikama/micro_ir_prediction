@@ -5,4 +5,4 @@ defaults:
   - /domain/microplastic/inference: default
 
 mlflow:
-  experiment_name: "microplastics_full_augmentation"
+  experiment_name: "microplastics"

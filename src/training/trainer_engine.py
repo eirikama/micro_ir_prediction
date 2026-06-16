@@ -29,9 +29,7 @@ def run_training(
         verbose=False,
         mode="max",
     )
-    # Guard: steps_per_epoch can be 0 when the dataset is tiny (e.g. small
-    # spectra_per_class with many classes).  PL raises on limit_train_batches=0
-    # and log_every_n_steps=0, so we clamp to at least 1.
+
     steps = max(1, datamodule.steps_per_epoch)
 
     trainer = pl.Trainer(

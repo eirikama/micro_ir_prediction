@@ -1,0 +1,8 @@
+defaults:
+  - /domain/pcuk/data: default
+  - /domain/pcuk/model: aacnn
+  - /domain/pcuk/trainer: default
+  - /domain/pcuk/inference: default
+
+mlflow:
+  experiment_name: "pcuk"

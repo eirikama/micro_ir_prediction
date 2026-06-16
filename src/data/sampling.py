@@ -24,7 +24,7 @@ def create_experiment_split(zarr_path: str, split_ratio: float = 0.5, seed: int 
     return {"train": train, "test": test}
 
 
-def get_training_data(
+def get_training_data_hyperspectral(
     split: list | None = None,
     zarr_path: str = "/mnt/ssd3/eirik/ProcessedData/microplastics_library.zarr",
     spectra_per_class: int = 8,
@@ -91,6 +91,184 @@ def get_training_data(
             all_labels.append(np.zeros(len(p_bkg)))
 
     return np.hstack(all_labels), np.vstack(all_spectra), wn, label_encoding
+
+
+def create_patient_split(
+    zarr_path: str,
+    test_ratio: float = 0.2,
+    seed: int = 42,
+    classes: list[str] | None = None,  # None = all classes
+) -> dict[str, list]:
+    """
+    Split cores into train / test with no patient appearing in both partitions.
+
+    Args:
+        zarr_path:  path to the zarr store
+        test_ratio: fraction of patients assigned to test (default 0.2)
+        seed:       random seed
+        classes:    if provided, only cores containing at least one pixel of
+                    these classes are included. Cores with none of the
+                    requested classes are dropped entirely.
+
+    Returns dict with keys 'train' and 'test', each a list of dicts:
+        {"name": core_name, "label": dominant_class, "patient_id": ...}
+    Compatible with get_training_data_pcuk(split=split["train"], classes=classes)
+    """
+    from collections import defaultdict
+    print(zarr_path)
+    store        = zarr.open(zarr_path, mode="r")
+    images_group = store["images"]
+    ALL_CLASSES  = list(store.attrs.get("classes", []))
+
+    # validate requested classes
+    if classes is not None:
+        unknown = [c for c in classes if c not in ALL_CLASSES]
+        if unknown:
+            raise ValueError(f"Unknown classes: {unknown}\nValid: {ALL_CLASSES}")
+        active_idx = {ALL_CLASSES.index(c) for c in classes}
+
+    # collect cores, optionally filtering to those containing requested classes
+    patient_to_cores: dict[str, list] = defaultdict(list)
+    skipped = 0
+
+    for name in images_group.keys():
+        attrs = images_group[name].attrs
+        pid   = attrs.get("patient_id", "unknown")
+
+        if classes is not None:
+            y            = images_group[name]["y"][:]
+            present_idx  = set(np.unique(y).tolist())
+            if not present_idx.intersection(active_idx):
+                skipped += 1
+                continue
+            # dominant class among requested classes only
+            mask          = np.isin(y, list(active_idx))
+            y_filtered    = y[mask]
+            counts        = np.bincount(y_filtered.astype(np.int64), minlength=len(ALL_CLASSES))
+            dominant      = ALL_CLASSES[int(counts.argmax())]
+        else:
+            dominant = attrs.get("label", "unknown")
+
+        patient_to_cores[pid].append({
+            "name":       name,
+            "label":      dominant,
+            "patient_id": pid,
+        })
+
+    if skipped:
+        print(f"  Skipped {skipped} cores with none of the requested classes")
+
+    patients = list(patient_to_cores.keys())
+    rng      = np.random.default_rng(seed)
+    rng.shuffle(patients)
+
+    n_test   = max(1, round(len(patients) * test_ratio))
+    n_train  = len(patients) - n_test
+
+    train_pats = patients[:n_train]
+    test_pats  = patients[n_train:]
+
+    def collect(plist):
+        return [core for pid in plist for core in patient_to_cores[pid]]
+
+    split = {"train": collect(train_pats), "test": collect(test_pats)}
+
+    # sanity check
+    train_pids = set(c["patient_id"] for c in split["train"])
+    test_pids  = set(c["patient_id"] for c in split["test"])
+    assert train_pids.isdisjoint(test_pids), "Patient leak: train ∩ test"
+
+    print(
+        f"Split -- "
+        f"train: {len(train_pats)} patients / {len(split['train'])} cores  |  "
+        f"test: {len(test_pats)} patients / {len(split['test'])} cores"
+    )
+    if classes is not None:
+        print(f"  Classes: {classes}")
+    print("No patient overlap")
+
+    return split
+
+
+
+def get_training_data_spectra(
+    split: list | None = None,
+    zarr_path: str = "/mnt/ssd3/eirik/ProcessedData/pcuk.zarr",
+    spectra_per_class: int | None = None,
+    max_per_core_per_class: int | None = None,
+    classes: list[str] | None = None,  # None = all 9 classes
+    seed: int = 42,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
+
+    root           = zarr.open(zarr_path, mode="r")
+    images_group   = root["images"]
+    wn             = np.asarray(root.attrs["wavenumbers"], dtype=np.float32)
+    ALL_CLASSES    = list(root.attrs["classes"])
+
+    active_classes = classes if classes is not None else ALL_CLASSES
+    unknown        = [c for c in active_classes if c not in ALL_CLASSES]
+    if unknown:
+        raise ValueError(f"Unknown classes: {unknown}\nValid: {ALL_CLASSES}")
+
+    active_idx     = [ALL_CLASSES.index(c) for c in active_classes]
+    label_encoding = {name: i for i, name in enumerate(active_classes)}
+
+    if split is None:
+        split = [{"name": name} for name in images_group.keys()]
+
+    rng = np.random.default_rng(seed)
+    per_class_X: dict[int, list[np.ndarray]] = {}
+
+    for item in split:
+        name = item["name"]
+        if name not in images_group:
+            print(f"  [warn] {name} not in store — skipping")
+            continue
+        grp = images_group[name]
+        X   = grp["X"][:]
+        y   = grp["y"][:]
+
+        for new_idx, orig_idx in enumerate(active_idx):
+            mask = y == orig_idx
+            if not mask.any():
+                continue
+            X_cls = X[mask]
+            if max_per_core_per_class is not None and len(X_cls) > max_per_core_per_class:
+                X_cls = X_cls[rng.choice(len(X_cls), max_per_core_per_class, replace=False)]
+            per_class_X.setdefault(new_idx, []).append(X_cls)
+
+    pooled = {
+        new_idx: np.concatenate(chunks, axis=0)
+        for new_idx, chunks in per_class_X.items()
+    }
+
+    missing = [active_classes[i] for i in range(len(active_classes)) if i not in pooled]
+    if missing:
+        print(f"  [warn] No pixels found for: {missing}")
+
+    cap = min(len(X_cls) for X_cls in pooled.values())
+    if spectra_per_class is not None:
+        cap = min(cap, spectra_per_class)
+
+    all_X, all_y = [], []
+    print(f"\n{'Class':<45} {'Available':>10} {'Sampled':>8}")
+    print("-" * 65)
+    for new_idx, name in enumerate(active_classes):
+        if new_idx not in pooled:
+            print(f"  {name:<43} {'MISSING':>10}")
+            continue
+        X_cls = pooled[new_idx]
+        sel   = rng.choice(len(X_cls), cap, replace=False)
+        all_X.append(X_cls[sel])
+        all_y.append(np.full(cap, new_idx, dtype=np.int64))
+        print(f"  {name:<43} {len(X_cls):>10,} {cap:>8,}")
+
+    print(f"\n  Balanced at {cap:,} px/class  ->  {cap * len(all_X):,} total\n")
+
+    X_out = np.vstack(all_X)
+    y_out = np.hstack(all_y)
+    order = rng.permutation(len(X_out))
+    return y_out[order], X_out[order], wn, label_encoding
 
 
 def get_test_split(test_zarr_path, train_zarr_path, rocks=None, conditions=None):

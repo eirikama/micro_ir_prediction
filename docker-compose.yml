@@ -15,6 +15,7 @@ x-base-env: &base-env
   - HYDRA_FULL_ERROR=1
   - LD_PRELOAD=/usr/local/lib/libsqlite3.so.0
   - PYTHONPATH=/app
+  - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 services:
   train:
@@ -39,7 +40,6 @@ services:
       - ${PROJECT_DIR}/main.py:/app/main.py
       - ${PROJECT_DIR}/sweep.py:/app/sweep.py
       - ${PROJECT_DIR}/configs:/app/configs
-      - ${PROJECT_DIR}/src/configs:/app/src/configs
       - ${PROJECT_DIR}/src/data:/app/src/data
       - ${PROJECT_DIR}/src/pipeline:/app/src/pipeline
       - ${PROJECT_DIR}/src/tracking:/app/src/tracking
@@ -47,6 +47,7 @@ services:
       - ${PROJECT_DIR}/src/inference:/app/src/inference
       - ${PROJECT_DIR}/src/models:/app/src/models
       - ${PROJECT_DIR}/src/utils.py:/app/src/utils.py
+      - ${PROJECT_DIR}/src/config_schema.py:/app/src/config_schema.py
     command: >
       python main.py
       mode=all

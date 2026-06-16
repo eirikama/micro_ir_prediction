@@ -10,27 +10,43 @@ from src.models.aacnn import AACNN
 
 
 def _open_z_arr(zarr_path: str, image_name: str):
-    """
-    Open the correct array from either store layout.
-    Train store: images/<name>/data  shape (H, W, n_wn)
-    Test store:  <name>/X            shape (n, n_wn) — returned as (n, 1, n_wn)
-    Returns (z_arr, H, W, Bands) where z_arr is always (H, W, n_wn)-compatible.
-    """
     store = zarr.open(zarr_path, mode="r")
+
     if "images" in store and image_name in store["images"]:
-        z_arr = store[f"images/{image_name}/data"]   # lazy zarr array
-        H, W, Bands = z_arr.shape
-        return z_arr, H, W, Bands
+        grp = store[f"images/{image_name}"]
+
+        if "data" in grp:
+            # microplastics layout: spatial cube (H, W, n_wn)
+            z_arr = grp["data"]
+            H, W, Bands = z_arr.shape
+            return z_arr, H, W, Bands
+
+        elif "X" in grp:
+            # PCUK layout: flat annotated spectra (N, n_wn)
+            X     = grp["X"][:]
+            z_arr = X[:, np.newaxis, :]   # (N, 1, n_wn)
+            H, W, Bands = z_arr.shape
+            return z_arr, H, W, Bands
+
+        else:
+            raise KeyError(
+                f"'{image_name}' found in store but has neither 'data' nor 'X'.\n"
+                f"  Keys: {list(grp.keys())}"
+            )
+
     elif image_name in store:
-        X = store[f"{image_name}/X"][:]              # (n, n_wn) — load fully
-        z_arr = X[:, np.newaxis, :]                  # (n, 1, n_wn) numpy array
+        # legacy test-store layout: <name>/X at root level
+        X     = store[f"{image_name}/X"][:]
+        z_arr = X[:, np.newaxis, :]
         H, W, Bands = z_arr.shape
         return z_arr, H, W, Bands
+
     else:
         raise KeyError(
             f"'{image_name}' not found in '{zarr_path}'.\n"
             f"  Top-level keys: {list(store.keys())}"
         )
+
 
 
 def inference_worker(
@@ -58,6 +74,12 @@ def inference_worker(
                     break
                 start, end = msg
                 data = flat_data_ram[start:end]
+                if False:
+                    mu = data.mean(axis=1, keepdims=True)
+                    sigma = data.std(axis=1, keepdims=True)
+                    data = (data - mu) / np.maximum(sigma, 1e-3)
+                    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+                chunk = torch.from_numpy(data).unsqueeze(1).to(device, non_blocking=True).half()
                 chunk = (
                     torch.from_numpy(data.astype(np.float32))
                     .unsqueeze(1)

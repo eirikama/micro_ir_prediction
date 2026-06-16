@@ -37,7 +37,7 @@ import argparse
 import subprocess
 import sys
 
-DOMAINS = ["microplastic", "bacteria", "mlrod", "pollen", "textile"]
+DOMAINS = ["microplastic", "bacteria", "mlrod", "pollen", "textile", "pcuk"]
 
 
 def main() -> None:
@@ -77,7 +77,7 @@ def main() -> None:
         "--multirun",
         f"domain={args.domain}",
         f"hydra/sweeper=optuna_{args.domain}",
-        "mode=train",
+        "mode=all",
     ]
 
     if args.n_trials is not None:

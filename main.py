@@ -1,7 +1,7 @@
 import getpass
 import logging
 import platform
-from collections import Counter
+from collections import Counter, defaultdict
 
 import git
 import hydra
@@ -11,9 +11,9 @@ import torch.multiprocessing as mp
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig, OmegaConf, open_dict
 
-from src.configs.config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
+from src.config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
 from src.data.datamodule import SpectralDataModule
-from src.data.sampling import create_experiment_split, get_test_split
+from src.data.sampling import create_experiment_split, get_test_split, create_patient_split
 from src.pipeline.train_pipeline import run_training_pipeline
 from src.pipeline.infer_pipeline import run_inference_pipeline
 from src.tracking import build_tracker
@@ -36,11 +36,19 @@ def main(cfg: DictConfig) -> float | None:
 
     # ── data setup ────────────────────────────────────────────────────────────
     if cfg.data.intrinsic_validation:
-        train_test_split = create_experiment_split(
-            cfg.data.zarr_path,
-            split_ratio=cfg.data.train_split_size,
+        # train_test_split = create_experiment_split(
+        #     cfg.data.zarr_path,
+        #     split_ratio=cfg.data.train_split_size,
+        #     seed=cfg.seed,
+        # )
+        train_test_split = create_patient_split(
+            zarr_path=cfg.data.zarr_path,
+            test_ratio=cfg.data.val_split_size,
             seed=cfg.seed,
+            # classes=["Normal epithelium", "Normal stroma",
+            #          "Cancerous epithelium", "Cancer-associated stroma"],
         )
+
         print("Train:", Counter(d["label"] for d in train_test_split["train"]))
         print("Test: ", Counter(d["label"] for d in train_test_split["test"]))
         datamodule  = SpectralDataModule(train_test_split["train"], cfg.data)
@@ -49,11 +57,23 @@ def main(cfg: DictConfig) -> float | None:
         datamodule  = SpectralDataModule(None, cfg.data)
         test_images = get_test_split(cfg.data.zarr_test_path, cfg.data.zarr_path)
 
+        ratio = float(cfg.data.get("test_sample_ratio", 1.0))
+        if ratio < 1.0:
+            rng = random.Random(cfg.seed)
+            by_label: dict = defaultdict(list)
+            for img in test_images:
+                by_label[img["label"]].append(img)
+            test_images = []
+            for imgs in by_label.values():
+                k = max(1, round(len(imgs) * ratio))
+                test_images.extend(rng.sample(imgs, min(k, len(imgs))))
+            log.info(
+                "Test subsample (ratio=%.2f): using %d images", ratio, len(test_images)
+            )
+
     datamodule.setup()
     label_encoding = datamodule.label_encoding
 
-    # ── augmentation summary (used for trial IDs and artifact logging) ────────
-    # Fluorescence fitting now happens inside datamodule.setup().
     aug_map = OmegaConf.to_container(cfg.data.get("augmentations") or {}, resolve=True)
     aug_summary_dict: dict = dict(aug_map)
     aug_summary_dict["augment_train"] = cfg.data.augment_train
@@ -128,7 +148,7 @@ def main(cfg: DictConfig) -> float | None:
         tracker.log_text(OmegaConf.to_yaml(cfg), "hydra_config.yaml")
 
         best_val_acc = None
-
+        test_acc = None
         # ── train ─────────────────────────────────────────────────────────────
         if cfg.mode in ["train", "all"]:
             best_path, best_val_acc = run_training_pipeline(cfg, datamodule, tracker)
@@ -139,10 +159,10 @@ def main(cfg: DictConfig) -> float | None:
         if cfg.mode in ["infer", "all"]:
             if not cfg.inference.ckpt_path:
                 raise ValueError("ckpt_path must be set to run inference.")
-            run_inference_pipeline(cfg, test_images, label_encoding, aug_summary_dict, tracker)
+            test_acc = run_inference_pipeline(cfg, test_images, label_encoding, aug_summary_dict, tracker)
 
-    return best_val_acc  # used by Hydra Optuna Sweeper as the objective value
-
+    objective = test_acc if test_acc is not None else best_val_acc
+    return objective
 
 if __name__ == "__main__":
     try:

@@ -23,52 +23,64 @@ def run_inference_pipeline(
     label_encoding: dict[str, int],
     aug_summary_dict: dict,
     tracker: Tracker,
-) -> None:
-    """Run pixel-wise inference over all test images and log results.
+) -> float | None:
 
-    Per-image failures are logged and skipped rather than crashing the whole
-    run, consistent with the ``failed`` list behaviour in the original code.
-    """
     image_metrics: list[dict] = []
     failed:        list[str]  = []
 
-    root_test = (
-        zarr.open(cfg.data.zarr_test_path, mode="r")
-        if not cfg.data.intrinsic_validation
-        else None
-    )
+    # is_pcuk = cfg.data.get("domain", "") == "pcuk"
+    is_pcuk = cfg.data.get("domain", "") == "milk"
 
-    log.info("Starting inference on %d images…", len(test_images))
+    # open the right store for ground truth
+    if is_pcuk:
+        root_gt = zarr.open(
+            cfg.data.zarr_path
+            if cfg.data.intrinsic_validation
+            else cfg.data.zarr_test_path,
+            mode="r",
+        )
+    else:
+        root_test = (
+            zarr.open(cfg.data.zarr_test_path, mode="r")
+            if not cfg.data.intrinsic_validation
+            else None
+        )
+
+    log.info("Starting inference on %d images...", len(test_images))
     t_infer_start = time.time()
 
     with open_pred_store(cfg.inference.pred_store_path) as pred_store:
         for i, img_data in enumerate(test_images):
-            img_name   = img_data["name"]
-            img_label  = img_data["label"]
+            img_name  = img_data["name"]
+            img_label = img_data["label"]
             safe_label = img_label.replace(" ", "_").replace("/", "_")
-            true_idx   = label_encoding.get(img_label) if cfg.data.intrinsic_validation else None
 
             log.info("Inference [%d/%d]: %s", i + 1, len(test_images), img_name)
 
             try:
                 t0 = time.time()
+                zarr_path = (
+                    cfg.data.zarr_path
+                    if cfg.data.intrinsic_validation
+                    else cfg.data.zarr_test_path
+                )
                 prob_map = run_inference(
                     cfg,
                     image_name=img_name,
                     ckpt_path=cfg.inference.ckpt_path,
                     batch_size=cfg.inference.batch_size,
-                    zarr_path=(
-                        cfg.data.zarr_test_path
-                        if not cfg.data.intrinsic_validation
-                        else cfg.data.zarr_path
-                    ),
+                    zarr_path=zarr_path,
                 )
 
-                y_true = (
-                    root_test[img_name]["y"][:]
-                    if not cfg.data.intrinsic_validation
-                    else true_idx
-                )
+                # ── ground truth ──────────────────────────────────────────
+                if is_pcuk:
+                    # per-pixel labels from store
+                    y_true = root_gt["images"][img_name]["y"][:]  # (N,) int8
+                else:
+                    if cfg.data.intrinsic_validation:
+                        y_true = label_encoding.get(img_label)    # single int
+                    else:
+                        y_true = root_test[img_name]["y"][:]
 
                 save_inference_outputs_zarr(
                     prob_map       = prob_map,
@@ -81,18 +93,38 @@ def run_inference_pipeline(
                     top_k_save     = cfg.inference.top_k_save,
                     aug_summary    = aug_summary_dict,
                     hparams        = {
-                        "lr":          cfg.model.lr,
-                        "batch_size":  cfg.data.batch_size,
-                        "mlflow_run":  tracker.run_id,
+                        "lr":         cfg.model.lr,
+                        "batch_size": cfg.data.batch_size,
+                        "mlflow_run": tracker.run_id,
                     },
                 )
 
                 argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
 
-                if not cfg.data.intrinsic_validation:
+                # ── accuracy logging ──────────────────────────────────────
+                if is_pcuk:
+                    # per-class accuracy using per-pixel GT
+                    acc_overall = float(np.mean(argmax == y_true))
+                    for class_name, class_idx in label_encoding.items():
+                        mask = y_true == class_idx
+                        if not mask.any():
+                            continue
+                        acc_cls  = float(np.mean(argmax[mask] == class_idx))
+                        safe_cls = f"{img_name}_{class_name}".replace(" ", "_")
+                        image_metrics.append({"image": safe_cls, "accuracy": acc_cls})
+                        tracker.log_metric(
+                            f"Inference/per_class/acc_{safe_cls}", acc_cls, step=i
+                        )
+                    image_metrics.append({"image": img_name, "accuracy": acc_overall})
+                    tracker.log_metric(
+                        f"Inference/acc_{img_name}", acc_overall, step=i
+                    )
+                    acc = acc_overall
+
+                elif not cfg.data.intrinsic_validation:
+                    # original spatial path — one label per image
                     acc_overall  = float(np.mean(argmax == y_true))
                     class_counts = dict(root_test[img_name].attrs["class_counts"])
-
                     for class_name in class_counts:
                         class_idx = label_encoding.get(class_name)
                         if class_idx is None:
@@ -103,22 +135,28 @@ def run_inference_pipeline(
                         acc_cls  = float(np.mean(argmax[mask] == class_idx))
                         safe_cls = f"{img_name}_{class_name}".replace(" ", "_")
                         image_metrics.append({"image": safe_cls, "accuracy": acc_cls})
-                        tracker.log_metric(f"Inference/per_class/acc_{safe_cls}", acc_cls, step=i)
-
+                        tracker.log_metric(
+                            f"Inference/per_class/acc_{safe_cls}", acc_cls, step=i
+                        )
                     image_metrics.append({"image": img_name, "accuracy": acc_overall})
-                    tracker.log_metric(f"Inference/acc_{img_name}", acc_overall, step=i)
+                    tracker.log_metric(
+                        f"Inference/acc_{img_name}", acc_overall, step=i
+                    )
                     acc = acc_overall
 
                 else:
+                    # intrinsic validation — single label per image
                     bg_prob = prob_map[:, :, cfg.inference.background_idx].flatten()
                     mask    = bg_prob <= cfg.inference.bg_threshold
                     acc     = (
-                        float(np.mean(argmax[mask] == true_idx))
+                        float(np.mean(argmax[mask] == y_true))
                         if mask.sum() > 0
                         else float("nan")
                     )
                     image_metrics.append({"image": img_label, "accuracy": acc})
-                    tracker.log_metric(f"Inference/per_class/acc_{safe_label}", acc, step=i)
+                    tracker.log_metric(
+                        f"Inference/per_class/acc_{safe_label}", acc, step=i
+                    )
 
                 log.info("  %s accuracy: %.4f", img_label, acc)
                 tracker.log_metric(
@@ -132,7 +170,7 @@ def run_inference_pipeline(
                 failed.append(img_name)
                 log.error("Failed image %s: %s", img_name, e, exc_info=True)
 
-    # ── summary metrics ───────────────────────────────────────────────────────
+    # ── summary metrics (unchanged) ───────────────────────────────────────────
     if image_metrics:
         accs = [m["accuracy"] for m in image_metrics if not np.isnan(m["accuracy"])]
         if accs:
@@ -140,13 +178,12 @@ def run_inference_pipeline(
             for m in image_metrics:
                 if not np.isnan(m["accuracy"]):
                     class_accs[m["image"]].append(m["accuracy"])
-
             for cls, cls_accs in class_accs.items():
                 safe = cls.replace(" ", "_").replace("/", "_")
                 tracker.log_metric(
-                    f"Inference/per_class/mean_acc_{safe}", float(np.mean(cls_accs))
+                    f"Inference/per_class/mean_acc_{safe}",
+                    float(np.mean(cls_accs)),
                 )
-
             tracker.log_metrics({
                 "Inference/mean_accuracy":   float(np.mean(accs)),
                 "Inference/min_accuracy":    float(np.min(accs)),
@@ -168,3 +205,9 @@ def run_inference_pipeline(
         len(test_images) - len(failed),
         len(test_images),
     )
+
+    if image_metrics:
+        accs = [m["accuracy"] for m in image_metrics if not np.isnan(m["accuracy"])]
+        if accs:
+            return float(np.mean(accs))
+    return None

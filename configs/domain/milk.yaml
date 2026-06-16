@@ -1,0 +1,8 @@
+defaults:
+  - /domain/milk/data: default
+  - /domain/milk/model: aacnn
+  - /domain/milk/trainer: default
+  - /domain/milk/inference: default
+
+mlflow:
+  experiment_name: "milk"
