@@ -1,0 +1,57 @@
+_target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
+storage: null
+study_name: milk_augmentation_sweep
+n_trials: 100
+n_jobs: 1
+direction: maximize
+search_space: null
+custom_search_space: null
+sampler:
+  _target_: optuna.samplers.TPESampler
+  seed: 42
+params:
+  # ── training / optimiser ──────────────────────────────────────────────────
+  model.lr: tag(log, interval(5e-7, 5e-3))
+  model.weight_decay: tag(log, interval(1e-5, 1e-1))
+  # ── augmentation: polynomial baseline ────────────────────────────────────
+  data.augmentations.polynomial_baseline_signal.ratio: interval(0.1, 0.9)
+  data.augmentations.polynomial_baseline_signal.p0_max: interval(0.1, 1.0)
+  data.augmentations.polynomial_baseline_signal.p1_min: interval(0.0, 0.5)
+  data.augmentations.polynomial_baseline_signal.p1_max: interval(0.5, 4.0)
+  data.augmentations.polynomial_baseline_signal.p2_max: tag(log, interval(1e-4, 1e-2))
+  # ── augmentation: noise ───────────────────────────────────────────────────
+  data.augmentations.noise.ratio: interval(0.1, 0.9)
+  data.augmentations.noise.max_level: tag(log, interval(5e-4, 2e-2))
+  # ── augmentation: CO2 peaks ───────────────────────────────────────────────
+  data.augmentations.co2_peaks.enabled: choice(true, false)
+  data.augmentations.co2_peaks.ratio: interval(0.05, 0.5)
+  data.augmentations.co2_peaks.d_height: interval(0.05, 0.8)
+  # ── augmentation: wavenumber shift ────────────────────────────────────────
+  data.augmentations.wavenumber_shift.enabled: choice(true, false)
+  data.augmentations.wavenumber_shift.ratio: interval(0.1, 0.9)
+  data.augmentations.wavenumber_shift.shift_max: interval(0.5, 4.0)
+  # ── augmentation: homogenizer degradation (fat-globule scattering) ───────
+  data.augmentations.homogenizer_degradation.enabled: choice(true, false)
+  data.augmentations.homogenizer_degradation.ratio: interval(0.1, 0.7)
+  data.augmentations.homogenizer_degradation.amplitude_max: tag(log, interval(0.01, 0.3))
+  data.augmentations.homogenizer_degradation.bump_width: interval(50.0, 200.0)
+  data.augmentations.homogenizer_degradation.bump_center_jitter: interval(10.0, 100.0)
+  # ── augmentation: temperature perturbation ────────────────────────────────
+  data.augmentations.temperature_perturbation.enabled: choice(true, false)
+  data.augmentations.temperature_perturbation.ratio: interval(0.1, 0.9)
+  data.augmentations.temperature_perturbation.temp_delta_max: interval(0.5, 4.0)
+  data.augmentations.temperature_perturbation.shift_per_degree: interval(0.1, 0.6)
+  # ── augmentation: preservative effect (azidiol) ───────────────────────────
+  data.augmentations.preservative_effect_azidiol.enabled: choice(true, false)
+  data.augmentations.preservative_effect_azidiol.ratio: interval(0.05, 0.5)
+  data.augmentations.preservative_effect_azidiol.amplitude_max: tag(log, interval(0.005, 0.1))
+  data.augmentations.preservative_effect_azidiol.shift_max: interval(0.0, 2.0)
+  # ── augmentation: preservative effect (bronopol) ──────────────────────────
+  data.augmentations.preservative_effect_bronopol.enabled: choice(true, false)
+  data.augmentations.preservative_effect_bronopol.ratio: interval(0.05, 0.5)
+  data.augmentations.preservative_effect_bronopol.amplitude_max: tag(log, interval(0.005, 0.1))
+  data.augmentations.preservative_effect_bronopol.shift_max: interval(0.0, 2.0)
+  # ── augmentation: dilution ────────────────────────────────────────────────
+  data.augmentations.dilution.enabled: choice(true, false)
+  data.augmentations.dilution.ratio: interval(0.05, 0.5)
+  data.augmentations.dilution.dilution_max: interval(0.02, 0.25)

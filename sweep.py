@@ -37,7 +37,7 @@ import argparse
 import subprocess
 import sys
 
-DOMAINS = ["microplastic", "bacteria", "mlrod", "pollen", "textile", "pcuk"]
+DOMAINS = ["microplastic", "bacteria", "mlrod", "pollen", "textile", "pcuk", "milk"]
 
 
 def main() -> None:

@@ -95,6 +95,8 @@ services:
       # data (read-only)
       - /mnt/ssd2:/mnt/ssd2:ro
       - /mnt/ssd3:/mnt/ssd3:ro
+      - ${PROJECT_DIR}/notebooks:/app/notebooks
+
       # outputs
       - ${PROJECT_DIR}/outputs:/app/outputs
       - ${PROJECT_DIR}/checkpoints:/app/checkpoints

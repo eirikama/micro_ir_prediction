@@ -1,12 +1,12 @@
 zarr_path: "/mnt/ssd3/eirik/ProcessedData/pcuk.zarr"
 intrinsic_validation: True
-spectra_per_class: 64
+spectra_per_class: 32
 sample_to_bkg_spectra_ratio: 2
 max_sampling_per_class_attempts: 1000
 sampling_patch_size: 64
-batch_size: 16
+batch_size: 32
 train_split_size: 0.5
-val_split_size: 0.2
+val_split_size: 0.5
 hyperspectra: False
 
 sample_min: 0.
@@ -24,7 +24,7 @@ augmentations:
     enabled: True
     signal_only: True
     ratio: 0.5
-    p0_min: -0.25
+    p0_min: -0.1
     p0_max: 0.5
     p1_min: 0.25
     p1_max: 2.0

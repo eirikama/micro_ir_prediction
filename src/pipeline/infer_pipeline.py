@@ -28,8 +28,8 @@ def run_inference_pipeline(
     image_metrics: list[dict] = []
     failed:        list[str]  = []
 
-    # is_pcuk = cfg.data.get("domain", "") == "pcuk"
-    is_pcuk = cfg.data.get("domain", "") == "milk"
+    is_pcuk = not cfg.data.hyperspectra
+    print(is_pcuk)
 
     # open the right store for ground truth
     if is_pcuk:
