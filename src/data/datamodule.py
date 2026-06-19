@@ -141,8 +141,8 @@ class SpectralDataModule(pl.LightningDataModule):
                 split=self.split,
                 zarr_path=self.cfg.zarr_path,
                 spectra_per_class=self.cfg.spectra_per_class * 2,
-                # classes=["Normal epithelium", "Normal stroma",
-                #          "Cancerous epithelium", "Cancer-associated stroma"]
+                classes=["Normal epithelium", "Normal stroma",
+                         "Cancerous epithelium", "Cancer-associated stroma"]
             )
         self.wn = wn
         self.spectra = spectra

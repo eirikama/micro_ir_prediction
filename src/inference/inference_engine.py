@@ -74,7 +74,7 @@ def inference_worker(
                     break
                 start, end = msg
                 data = flat_data_ram[start:end]
-                if False:
+                if True:
                     mu = data.mean(axis=1, keepdims=True)
                     sigma = data.std(axis=1, keepdims=True)
                     data = (data - mu) / np.maximum(sigma, 1e-3)

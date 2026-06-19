@@ -45,8 +45,8 @@ def main(cfg: DictConfig) -> float | None:
             zarr_path=cfg.data.zarr_path,
             test_ratio=cfg.data.val_split_size,
             seed=cfg.seed,
-            # classes=["Normal epithelium", "Normal stroma",
-            #          "Cancerous epithelium", "Cancer-associated stroma"],
+            classes=["Normal epithelium", "Normal stroma",
+                     "Cancerous epithelium", "Cancer-associated stroma"],
         )
 
         print("Train:", Counter(d["label"] for d in train_test_split["train"]))
