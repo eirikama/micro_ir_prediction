@@ -1,9 +1,9 @@
 zarr_path: "/mnt/ssd3/eirik/ProcessedData/pcuk.zarr"
 intrinsic_validation: True
-spectra_per_class: 32
+spectra_per_class: 128
 sample_to_bkg_spectra_ratio: 2
 max_sampling_per_class_attempts: 1000
-sampling_patch_size: 64
+sampling_patch_size: 8
 batch_size: 32
 train_split_size: 0.5
 val_split_size: 0.5
@@ -36,7 +36,7 @@ augmentations:
   noise:
     enabled: True
     ratio: 0.5
-    max_level: 0.01
+    max_level: 0.025
 
   co2_peaks:
     enabled: True
@@ -53,14 +53,14 @@ augmentations:
   paraffin:
     type: paraffin
     enabled: True
-    ratio: 0.3
+    ratio: 0.4
     amplitude_min: 0.0
-    amplitude_max: 0.1
+    amplitude_max: 2.
     randomise_bands: True
 
   wavenumber_shift:
     type: wavenumber_shift
     enabled: True
-    ratio: 0.3
-    shift_max: 2.0
+    ratio: 0.4
+    shift_max: 30.0
     per_batch: False

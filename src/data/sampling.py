@@ -195,21 +195,17 @@ def get_training_data_spectra(
     split: list | None = None,
     zarr_path: str = "/mnt/ssd3/eirik/ProcessedData/pcuk.zarr",
     spectra_per_class: int | None = None,
-    max_per_core_per_class: int | None = None,
-    classes: list[str] | None = None,  # None = all 9 classes
+    classes: list[str] | None = None,
     seed: int = 42,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
-
     root           = zarr.open(zarr_path, mode="r")
     images_group   = root["images"]
     wn             = np.asarray(root.attrs["wavenumbers"], dtype=np.float32)
     ALL_CLASSES    = list(root.attrs["classes"])
-
     active_classes = classes if classes is not None else ALL_CLASSES
     unknown        = [c for c in active_classes if c not in ALL_CLASSES]
     if unknown:
         raise ValueError(f"Unknown classes: {unknown}\nValid: {ALL_CLASSES}")
-
     active_idx     = [ALL_CLASSES.index(c) for c in active_classes]
     label_encoding = {name: i for i, name in enumerate(active_classes)}
 
@@ -217,7 +213,9 @@ def get_training_data_spectra(
         split = [{"name": name} for name in images_group.keys()]
 
     rng = np.random.default_rng(seed)
-    per_class_X: dict[int, list[np.ndarray]] = {}
+
+    # per_class_cores[new_idx] = list of np.ndarray, one per core
+    per_class_cores: dict[int, list[np.ndarray]] = {}
 
     for item in split:
         name = item["name"]
@@ -227,43 +225,53 @@ def get_training_data_spectra(
         grp = images_group[name]
         X   = grp["X"][:]
         y   = grp["y"][:]
-
         for new_idx, orig_idx in enumerate(active_idx):
             mask = y == orig_idx
             if not mask.any():
                 continue
-            X_cls = X[mask]
-            if max_per_core_per_class is not None and len(X_cls) > max_per_core_per_class:
-                X_cls = X_cls[rng.choice(len(X_cls), max_per_core_per_class, replace=False)]
-            per_class_X.setdefault(new_idx, []).append(X_cls)
+            per_class_cores.setdefault(new_idx, []).append(X[mask])
 
-    pooled = {
-        new_idx: np.concatenate(chunks, axis=0)
-        for new_idx, chunks in per_class_X.items()
-    }
-
-    missing = [active_classes[i] for i in range(len(active_classes)) if i not in pooled]
+    missing = [active_classes[i] for i in range(len(active_classes)) if i not in per_class_cores]
     if missing:
         print(f"  [warn] No pixels found for: {missing}")
 
-    cap = min(len(X_cls) for X_cls in pooled.values())
-    if spectra_per_class is not None:
-        cap = min(cap, spectra_per_class)
-
     all_X, all_y = [], []
-    print(f"\n{'Class':<45} {'Available':>10} {'Sampled':>8}")
-    print("-" * 65)
-    for new_idx, name in enumerate(active_classes):
-        if new_idx not in pooled:
-            print(f"  {name:<43} {'MISSING':>10}")
-            continue
-        X_cls = pooled[new_idx]
-        sel   = rng.choice(len(X_cls), cap, replace=False)
-        all_X.append(X_cls[sel])
-        all_y.append(np.full(cap, new_idx, dtype=np.int64))
-        print(f"  {name:<43} {len(X_cls):>10,} {cap:>8,}")
+    print(f"\n{'Class':<45} {'Cores':>6} {'Available':>10} {'Sampled':>8}")
+    print("-" * 73)
 
-    print(f"\n  Balanced at {cap:,} px/class  ->  {cap * len(all_X):,} total\n")
+    for new_idx, name in enumerate(active_classes):
+        if new_idx not in per_class_cores:
+            print(f"  {name:<43} {'MISSING':>6}")
+            continue
+
+        cores       = per_class_cores[new_idx]
+        n_cores     = len(cores)
+        total_avail = sum(len(c) for c in cores)
+
+        if spectra_per_class is not None:
+            budget = min(spectra_per_class, total_avail)
+        else:
+            budget = total_avail
+
+        # distribute budget evenly across cores; remainder goes to largest cores
+        base_quota, remainder = divmod(budget, n_cores)
+        # sort cores largest-first so remainder slots go to cores that can fill them
+        order       = sorted(range(n_cores), key=lambda i: len(cores[i]), reverse=True)
+        selected    = []
+        for rank, ci in enumerate(order):
+            quota = base_quota + (1 if rank < remainder else 0)
+            quota = min(quota, len(cores[ci]))          # can't exceed what core has
+            if quota > 0:
+                idx = rng.choice(len(cores[ci]), quota, replace=False)
+                selected.append(cores[ci][idx])
+
+        X_cls    = np.concatenate(selected, axis=0)
+        sampled  = len(X_cls)
+        all_X.append(X_cls)
+        all_y.append(np.full(sampled, new_idx, dtype=np.int64))
+        print(f"  {name:<43} {n_cores:>6} {total_avail:>10,} {sampled:>8,}")
+
+    print(f"\n  Total: {sum(len(y) for y in all_y):,} spectra across {len(all_X)} classes\n")
 
     X_out = np.vstack(all_X)
     y_out = np.hstack(all_y)
