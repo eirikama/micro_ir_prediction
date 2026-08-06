@@ -7,6 +7,8 @@
 ![MLflow](https://img.shields.io/badge/MLflow-tracking-0194E2?logo=mlflow&logoColor=white)
 ![Zarr](https://img.shields.io/badge/Zarr-LMDB-orange)
 ![Docker](https://img.shields.io/badge/Docker-24.0-2496ED?logo=docker&logoColor=white)
+[![tests](https://github.com/eirikama/micro_ir_prediction/actions/workflows/tests.yml/badge.svg)](https://github.com/eirikama/micro_ir_prediction/actions/workflows/tests.yml)
+![coverage](https://raw.githubusercontent.com/eirikama/micro_ir_prediction/master/coverage.svg)
 
 Deep learning pipeline for classification of spectral data and hyperspectral microscopy images across multiple material domains. Trains a 1D attention-augmented convolutional neural network (AACNN) on synthetically augmented reference spectra and runs GPU-accelerated pixel-wise inference over full hyperspectral image cubes, producing per-pixel class probability maps.
 
@@ -467,6 +469,24 @@ cd src/physics/cylinder && python setup_bessel.py    build_ext --inplace
 ```
 
 Required for IR domains only. Raman domains (mlrod, bacteria) do not call them.
+
+---
+
+## Testing
+
+The suite lives in `tests/` (pytest) and covers augmentation, config loading, the dataset/sampling pipeline, loss, model, inference export, tracking, and a training sanity check.
+
+```bash
+pip install pytest pytest-cov pytest-timeout
+pytest tests/ --cov=src --cov-report=term-missing
+```
+
+- Each test times out after 120s (`tool.pytest.ini_options` in `pyproject.toml`).
+- Coverage is scoped to `src/` and excludes `src/physics/*` (generated Cython C code skews the numbers).
+- Mie-scattering tests auto-skip if the [Cython extensions](#cython-extensions) haven't been built.
+- `slow` and `gpu` markers exist for opt-in tests; run `pytest -m "not slow and not gpu"` to skip them.
+
+CI ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs the suite on every push/PR to `master` and `add_ramen`, on CPU-only PyTorch. The coverage badge above is regenerated and committed automatically on each push to `master`.
 
 ---
 

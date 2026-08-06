@@ -2,13 +2,15 @@ name: tests
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master, add_ramen]
   pull_request:
-    branches: [main, develop]
+    branches: [master, add_ramen]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to commit the coverage badge back to the repo
 
     steps:
       # ── checkout ────────────────────────────────────────────────────────────
@@ -63,3 +65,23 @@ jobs:
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      # ── self-contained coverage badge (no external service/token needed) ────
+      # Regenerated on every push to master and committed back to the repo so
+      # the README badge always reflects master's latest coverage. Skipped on
+      # pull_request events (no push rights to a fork's branch) and on
+      # add_ramen (avoids badge churn/conflicts on the feature branch).
+      - name: Generate coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          pip install coverage-badge
+          coverage-badge -o coverage.svg -f
+
+      - name: Commit coverage badge
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add coverage.svg
+          git diff --staged --quiet || git commit -m "chore: update coverage badge [skip ci]"
+          git push
