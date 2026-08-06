@@ -24,7 +24,7 @@ class TrainerConfig:
     log_every_n_epochs: int = 5
     precision: str = "16-mixed"
     accelerator: str = "gpu"
-    devices: int = 1
+    devices: Any = 1
     gradient_clip_val: float = 1.0
 
 @dataclass
@@ -44,12 +44,13 @@ class DataConfig:
     zarr_test_path: str = ""
     intrinsic_validation: bool = False
     hyperspectra: bool = True
+    split_by_patient: bool = True
     spectra_per_class: int = 8
     sample_to_bkg_spectra_ratio: int = 2
     max_sampling_per_class_attempts: int = 1000
     sampling_patch_size: int = 64
     batch_size: int = 64
-    train_split_size: float = 0.5
+    test_split_size: float = 0.5
     val_split_size: float = 0.5
     sample_min: float = 0.5
     background_max: float = 0.1
@@ -59,6 +60,7 @@ class DataConfig:
     augment_val: bool = False
     test_sample_ratio: float = 1.0
     modality: str = "ir"
+    classes: Optional[list[str]] = None
     augmentations: Any = field(default_factory=dict)
 
 @dataclass

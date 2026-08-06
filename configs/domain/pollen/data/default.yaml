@@ -1,11 +1,13 @@
 zarr_path: "/mnt/ssd3/eirik/ProcessedData/ase_pollen_library.zarr"
 intrinsic_validation: True
+split_by_patient: False
+hyperspectra: True
 spectra_per_class: 64
 sample_to_bkg_spectra_ratio: 2
 max_sampling_per_class_attempts: 1000
 sampling_patch_size: 64
 batch_size: 64
-train_split_size: 0.5
+test_split_size: 0.5
 val_split_size: 0.5
 
 sample_min: 0.3

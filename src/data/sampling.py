@@ -3,6 +3,30 @@ import numpy as np
 import zarr
 from sklearn.model_selection import train_test_split
 
+
+def get_test_split(test_zarr_path, train_zarr_path, rocks=None, conditions=None):
+    root_train    = zarr.open(train_zarr_path, mode="r")
+    root_test     = zarr.open(test_zarr_path,  mode="r")
+    train_classes = list(root_train.attrs["classes"])
+    test_classes  = list(root_test.attrs["classes"])
+    assert train_classes == test_classes, (
+        f"Class mismatch!\n  train: {train_classes}\n  test:  {test_classes}"
+    )
+    test_images = []
+    for key in sorted(root_test.group_keys()):
+        grp   = root_test[key]
+        attrs = grp.attrs
+        if rocks      is not None and attrs.get("rock")      not in rocks:      continue
+        if conditions is not None and attrs.get("condition") not in conditions: continue
+        test_images.append({
+            "name":      key,
+            "label":     attrs.get("rock", key),   # falls back to key for bacteria
+            "rock":      attrs.get("rock"),
+            "condition": attrs.get("condition"),
+        })
+    return test_images
+
+
 def create_experiment_split(zarr_path: str, split_ratio: float = 0.5, seed: int = 42) -> dict[str, list]:
     store = zarr.open(zarr_path, mode="r")
     images_group = store["images"]
@@ -22,75 +46,6 @@ def create_experiment_split(zarr_path: str, split_ratio: float = 0.5, seed: int 
     )
 
     return {"train": train, "test": test}
-
-
-def get_training_data_hyperspectral(
-    split: list | None = None,
-    zarr_path: str = "/mnt/ssd3/eirik/ProcessedData/microplastics_library.zarr",
-    spectra_per_class: int = 8,
-    bkg_per_class: int = 4,
-    patch_size: int = 128,
-    background_max: float = 0.1,
-    sample_min: float = 0.5,
-    max_class_attempts: int = 1000,
-    include_bkg_pixels: bool = True,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
-
-    root = zarr.open(zarr_path, mode="r")
-    images_group = root["images"]
-    wn = np.asarray(root.attrs["wavenumbers"], dtype=np.float32)
-    if split is None:
-        split = [
-            {"name": name, "label": images_group[name].attrs.get("label", name)}
-            for name in images_group.keys()
-        ]
-    unique_labels = sorted(list(set(item["label"] for item in split)))
-    rng = np.random.default_rng()
-    spectra_per_patch = max(1, spectra_per_class // len(unique_labels))
-    all_spectra, all_labels = [], []
-    label_encoding = {"bkg": 0} if include_bkg_pixels else {}
-    for i, label in enumerate(unique_labels):
-        class_idx = i + 1 if include_bkg_pixels else i
-        label_encoding[label] = class_idx
-        names = [item["name"] for item in split if item["label"] == label]
-        attempts = 0
-        p_sample, p_bkg = [], []
-        while len(p_sample) < spectra_per_class or (include_bkg_pixels and len(p_bkg) < bkg_per_class):
-            attempts += 1
-            if attempts > max_class_attempts:
-                bkg_status = f", {len(p_bkg)}/{bkg_per_class} background" if include_bkg_pixels else ""
-                raise RuntimeError(
-                    f"\n[Data Sampling Error] Class '{label}' failed to meet quotas after {max_class_attempts} attempts.\n"
-                    f"Found: {len(p_sample)}/{spectra_per_class} plastic{bkg_status}.\n"
-                    f"Check if background_max ({background_max}) or sample_min ({sample_min}) are too restrictive."
-                )
-            name = names[rng.integers(len(names))]
-            z_arr = images_group[name]["data"]
-            H, W, L = z_arr.shape
-            y0 = rng.integers(0, max(1, H - patch_size))
-            x0 = rng.integers(0, max(1, W - patch_size))
-            patch = z_arr[y0 : y0 + patch_size, x0 : x0 + patch_size]
-            spectra = patch.reshape(-1, L)
-            means = spectra.mean(axis=1)
-            if len(p_sample) < spectra_per_class:
-                spec_mask = means > sample_min
-                if spec_mask.any():
-                    valid = spectra[spec_mask]
-                    k = min(spectra_per_patch, len(valid), spectra_per_class - len(p_sample))
-                    p_sample.extend(rng.choice(valid, size=k, replace=False))
-            if include_bkg_pixels and len(p_bkg) < bkg_per_class:
-                bkg_mask = means < background_max
-                if bkg_mask.any():
-                    valid = spectra[bkg_mask]
-                    k = min(spectra_per_patch, len(valid), bkg_per_class - len(p_bkg))
-                    p_bkg.extend(rng.choice(valid, size=k, replace=False))
-        all_spectra.append(np.stack(p_sample))
-        all_labels.append(np.full(len(p_sample), class_idx))
-        if include_bkg_pixels:
-            all_spectra.append(np.stack(p_bkg))
-            all_labels.append(np.zeros(len(p_bkg)))
-
-    return np.hstack(all_labels), np.vstack(all_spectra), wn, label_encoding
 
 
 def create_patient_split(
@@ -190,6 +145,135 @@ def create_patient_split(
     return split
 
 
+def get_training_data_hyperspectral(
+    split: list | None = None,
+    zarr_path: str = "/mnt/ssd3/eirik/ProcessedData/microplastics_library.zarr",
+    spectra_per_class: int = 8,
+    bkg_per_class: int = 4,
+    background_max: float = 0.1,
+    sample_min: float = 0.5,
+    include_bkg_pixels: bool = True,
+    seed: int = 42,
+    patch_size: int = 128,        # accepted-and-ignored (kept so configs don't break)
+    max_class_attempts: int = 1000,  # accepted-and-ignored (no rejection loop anymore)
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, int]]:
+    root         = zarr.open(zarr_path, mode="r")
+    images_group = root["images"]
+    wn           = np.asarray(root.attrs["wavenumbers"], dtype=np.float32)
+
+    if split is None:
+        split = [
+            {"name": name, "label": images_group[name].attrs.get("label", name)}
+            for name in images_group.keys()
+        ]
+
+    unique_labels = sorted(set(item["label"] for item in split))
+    rng           = np.random.default_rng(seed)
+
+    label_encoding = {"bkg": 0} if include_bkg_pixels else {}
+    all_spectra, all_labels = [], []
+
+    header = f"\n{'Class':<45} {'Imgs':>5} {'Avail':>10} {'Sampled':>8}"
+    if include_bkg_pixels:
+        header += f" {'BkgAvail':>9} {'BkgSmp':>7}"
+    print(header)
+    print("-" * len(header))
+
+    for i, label in enumerate(unique_labels):
+        class_idx = i + 1 if include_bkg_pixels else i
+        label_encoding[label] = class_idx
+        names = [item["name"] for item in split if item["label"] == label]
+
+        # ── pass 1: read each image once, split pixels by threshold ──────────
+        sample_cores, bkg_cores = [], []
+        for name in names:
+            if name not in images_group:
+                print(f"  [warn] {name} not in store — skipping")
+                continue
+            data    = images_group[name]["data"][:]          # (H, W, L) full cube
+            L       = data.shape[-1]
+            spectra = data.reshape(-1, L)
+            means   = spectra.mean(axis=1)
+
+            s_mask = means > sample_min
+            if s_mask.any():
+                sample_cores.append(spectra[s_mask])
+            if include_bkg_pixels:
+                b_mask = means < background_max
+                if b_mask.any():
+                    bkg_cores.append(spectra[b_mask])
+
+        # ── pass 2: water-fill the budgets across images ─────────────────────
+        s_avail  = sum(len(c) for c in sample_cores)
+        s_budget = min(spectra_per_class, s_avail)
+        s_quotas = allocate([len(c) for c in sample_cores], s_budget, rng)
+        s_sel    = [c[rng.choice(len(c), int(q), replace=False)]
+                    for c, q in zip(sample_cores, s_quotas) if q > 0]
+
+        if not s_sel:
+            print(f"  [warn] class '{label}' has no sample pixels — skipping")
+            continue
+
+        X_s = np.concatenate(s_sel, axis=0)
+        all_spectra.append(X_s)
+        all_labels.append(np.full(len(X_s), class_idx, dtype=np.int64))
+
+        line = f"  {label:<43} {len(names):>5} {s_avail:>10,} {len(X_s):>8,}"
+
+        if include_bkg_pixels:
+            b_avail  = sum(len(c) for c in bkg_cores)
+            b_budget = min(bkg_per_class, b_avail)
+            b_quotas = allocate([len(c) for c in bkg_cores], b_budget, rng)
+            b_sel    = [c[rng.choice(len(c), int(q), replace=False)]
+                        for c, q in zip(bkg_cores, b_quotas) if q > 0]
+            if b_sel:
+                X_b = np.concatenate(b_sel, axis=0)
+                all_spectra.append(X_b)
+                all_labels.append(np.zeros(len(X_b), dtype=np.int64))
+                line += f" {b_avail:>9,} {len(X_b):>7,}"
+            else:
+                line += f" {b_avail:>9,} {0:>7}"
+
+        print(line)
+
+    print(f"\n  Total: {sum(len(y) for y in all_labels):,} spectra "
+          f"across {len(unique_labels)} classes\n")
+
+    return np.hstack(all_labels), np.vstack(all_spectra), wn, label_encoding
+
+
+
+def allocate(capacities, budget, rng):
+    """Water-filling allocation.
+
+    Distribute `budget` picks across cores without exceeding any core's
+    capacity, redistributing the shortfall from small/full cores to cores
+    that still have room. Returns an int array of per-core quotas summing
+    to min(budget, total capacity).
+    """
+    caps   = np.asarray(capacities, dtype=np.int64)
+    budget = min(int(budget), int(caps.sum()))
+    quota  = np.zeros_like(caps)
+
+    while budget > 0:
+        active = quota < caps                       # cores with room left
+        n = int(active.sum())
+        if n == 0:
+            break                                   # everything is full
+        give = budget // n
+        if give == 0:
+            # fewer picks left than active cores: hand out one each,
+            # to a random subset, so no core is systematically favoured
+            idx = rng.permutation(np.where(active)[0])[:budget]
+            quota[idx] += 1
+            budget -= len(idx)
+            continue
+        add = np.where(active, np.minimum(give, caps - quota), 0)
+        quota += add
+        budget -= int(add.sum())
+
+    return quota
+
 
 def get_training_data_spectra(
     split: list | None = None,
@@ -223,13 +307,27 @@ def get_training_data_spectra(
             print(f"  [warn] {name} not in store — skipping")
             continue
         grp = images_group[name]
-        X   = grp["X"][:]
-        y   = grp["y"][:]
-        for new_idx, orig_idx in enumerate(active_idx):
-            mask = y == orig_idx
-            if not mask.any():
+        if "X" in grp and "y" in grp:
+            # per-core store: pixels carry mixed labels, filter by y
+            X = grp["X"][:]
+            y = grp["y"][:]
+            for new_idx, orig_idx in enumerate(active_idx):
+                mask = y == orig_idx
+                if not mask.any():
+                    continue
+                per_class_cores.setdefault(new_idx, []).append(X[mask])
+        elif "data" in grp:
+            # per-class library store: the whole group is one class (e.g. bacteria
+            # reference library) — no per-pixel y labels to mask against.
+            label = grp.attrs.get("label", name)
+            if label not in active_classes:
                 continue
-            per_class_cores.setdefault(new_idx, []).append(X[mask])
+            new_idx = active_classes.index(label)
+            X = grp["data"][:]
+            X = X.reshape(X.shape[0], -1)  # collapse any singleton channel dims
+            per_class_cores.setdefault(new_idx, []).append(X)
+        else:
+            print(f"  [warn] {name} has neither X/y nor data — skipping")
 
     missing = [active_classes[i] for i in range(len(active_classes)) if i not in per_class_cores]
     if missing:
@@ -248,25 +346,21 @@ def get_training_data_spectra(
         n_cores     = len(cores)
         total_avail = sum(len(c) for c in cores)
 
-        if spectra_per_class is not None:
-            budget = min(spectra_per_class, total_avail)
-        else:
-            budget = total_avail
+        # target budget for this class
+        budget = total_avail if spectra_per_class is None \
+                 else min(spectra_per_class, total_avail)
 
-        # distribute budget evenly across cores; remainder goes to largest cores
-        base_quota, remainder = divmod(budget, n_cores)
-        # sort cores largest-first so remainder slots go to cores that can fill them
-        order       = sorted(range(n_cores), key=lambda i: len(cores[i]), reverse=True)
-        selected    = []
-        for rank, ci in enumerate(order):
-            quota = base_quota + (1 if rank < remainder else 0)
-            quota = min(quota, len(cores[ci]))          # can't exceed what core has
-            if quota > 0:
-                idx = rng.choice(len(cores[ci]), quota, replace=False)
+        # water-filling: never leaves usable pixels on the table
+        quotas   = allocate([len(c) for c in cores], budget, rng)
+
+        selected = []
+        for ci, q in enumerate(quotas):
+            if q > 0:
+                idx = rng.choice(len(cores[ci]), int(q), replace=False)
                 selected.append(cores[ci][idx])
 
-        X_cls    = np.concatenate(selected, axis=0)
-        sampled  = len(X_cls)
+        X_cls   = np.concatenate(selected, axis=0)
+        sampled = len(X_cls)
         all_X.append(X_cls)
         all_y.append(np.full(sampled, new_idx, dtype=np.int64))
         print(f"  {name:<43} {n_cores:>6} {total_avail:>10,} {sampled:>8,}")
@@ -277,26 +371,3 @@ def get_training_data_spectra(
     y_out = np.hstack(all_y)
     order = rng.permutation(len(X_out))
     return y_out[order], X_out[order], wn, label_encoding
-
-
-def get_test_split(test_zarr_path, train_zarr_path, rocks=None, conditions=None):
-    root_train    = zarr.open(train_zarr_path, mode="r")
-    root_test     = zarr.open(test_zarr_path,  mode="r")
-    train_classes = list(root_train.attrs["classes"])
-    test_classes  = list(root_test.attrs["classes"])
-    assert train_classes == test_classes, (
-        f"Class mismatch!\n  train: {train_classes}\n  test:  {test_classes}"
-    )
-    test_images = []
-    for key in sorted(root_test.group_keys()):
-        grp   = root_test[key]
-        attrs = grp.attrs
-        if rocks      is not None and attrs.get("rock")      not in rocks:      continue
-        if conditions is not None and attrs.get("condition") not in conditions: continue
-        test_images.append({
-            "name":      key,
-            "label":     attrs.get("rock", key),   # falls back to key for bacteria
-            "rock":      attrs.get("rock"),
-            "condition": attrs.get("condition"),
-        })
-    return test_images

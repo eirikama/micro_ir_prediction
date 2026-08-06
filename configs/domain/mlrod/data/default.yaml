@@ -7,7 +7,7 @@ sample_to_bkg_spectra_ratio: 2
 max_sampling_per_class_attempts: 1000
 sampling_patch_size: 64
 batch_size: 64
-train_split_size: 0.5
+test_split_size: 0.5
 val_split_size: 0.5
 
 sample_min: 0.0

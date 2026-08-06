@@ -36,18 +36,19 @@ def main(cfg: DictConfig) -> float | None:
 
     # ── data setup ────────────────────────────────────────────────────────────
     if cfg.data.intrinsic_validation:
-        # train_test_split = create_experiment_split(
-        #     cfg.data.zarr_path,
-        #     split_ratio=cfg.data.train_split_size,
-        #     seed=cfg.seed,
-        # )
-        train_test_split = create_patient_split(
-            zarr_path=cfg.data.zarr_path,
-            test_ratio=cfg.data.val_split_size,
-            seed=cfg.seed,
-            classes=["Normal epithelium", "Normal stroma",
-                     "Cancerous epithelium", "Cancer-associated stroma"],
-        )
+        if cfg.data.get("split_by_patient", True):
+            train_test_split = create_patient_split(
+                zarr_path=cfg.data.zarr_path,
+                test_ratio=cfg.data.test_split_size,
+                seed=cfg.seed,
+                classes=list(cfg.data.classes) if cfg.data.get("classes") else None,
+            )
+        else:
+            train_test_split = create_experiment_split(
+                cfg.data.zarr_path,
+                split_ratio=cfg.data.test_split_size,
+                seed=cfg.seed,
+            )
 
         print("Train:", Counter(d["label"] for d in train_test_split["train"]))
         print("Test: ", Counter(d["label"] for d in train_test_split["test"]))

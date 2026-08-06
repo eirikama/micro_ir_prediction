@@ -2,17 +2,12 @@ zarr_path: "/mnt/ssd3/eirik/ProcessedData/bacteria/ho_reference.zarr"
 zarr_test_path: "/mnt/ssd3/eirik/ProcessedData/bacteria/ho_bacteria_test.zarr"
 
 intrinsic_validation: False
+hyperspectra: False
 spectra_per_class: 32
-sample_to_bkg_spectra_ratio: 2
-max_sampling_per_class_attempts: 1000
-sampling_patch_size: 64
 batch_size: 64
-train_split_size: 0.5
+test_split_size: 0.5
 val_split_size: 0.5
 
-sample_min: 0.0
-background_max: 0.0
-include_bkg_pixels: False
 z_normalize: True
 augment_train: True
 augment_val: False
@@ -25,7 +20,7 @@ augmentations:
     ratio: 0.5
     spike_rate: 0.0002
     amplitude_min: 2.0
-    amplitude_max: 5.0
+    amplitude_max: 5
     max_width: 3
 
   fluorescence:

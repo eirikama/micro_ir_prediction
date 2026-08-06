@@ -1,11 +1,16 @@
 zarr_path: "/mnt/ssd3/eirik/ProcessedData/pcuk.zarr"
 intrinsic_validation: True
+classes:
+  - "Normal epithelium"
+  - "Normal stroma"
+  - "Cancerous epithelium"
+  - "Cancer-associated stroma"
 spectra_per_class: 128
 sample_to_bkg_spectra_ratio: 2
 max_sampling_per_class_attempts: 1000
 sampling_patch_size: 8
 batch_size: 32
-train_split_size: 0.5
+test_split_size: 0.5
 val_split_size: 0.5
 hyperspectra: False
 

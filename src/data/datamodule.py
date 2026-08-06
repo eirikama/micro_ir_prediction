@@ -137,12 +137,12 @@ class SpectralDataModule(pl.LightningDataModule):
                 include_bkg_pixels=self.cfg.include_bkg_pixels
             )
         else:
+
             label, spectra, wn, label_encoding = get_training_data_spectra(
                 split=self.split,
                 zarr_path=self.cfg.zarr_path,
                 spectra_per_class=self.cfg.spectra_per_class * 2,
-                classes=["Normal epithelium", "Normal stroma",
-                         "Cancerous epithelium", "Cancer-associated stroma"]
+                classes=list(self.cfg.classes) if self.cfg.get("classes") else None,
             )
         self.wn = wn
         self.spectra = spectra
