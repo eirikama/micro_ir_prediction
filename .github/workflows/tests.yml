@@ -5,6 +5,7 @@ on:
     branches: [master, add_ramen]
   pull_request:
     branches: [master, add_ramen]
+  workflow_dispatch:   # lets you fire a run manually from the Actions tab
 
 jobs:
   test:
