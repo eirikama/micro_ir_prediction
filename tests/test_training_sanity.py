@@ -248,8 +248,11 @@ class TestTrainingTerminates:
         """Trainer should complete exactly max_epochs epochs."""
         res = self._run_training(n_spectra_per_class=16, batch_size=4, max_epochs=3)
         assert res["done"]
-        # trainer.current_epoch is 0-indexed; after 3 epochs it equals 2
-        assert res["epoch"] == 2
+        # run_training reads trainer.current_epoch after fit() returns. In
+        # pytorch_lightning 2.5.0 (pinned) it's incremented once more after
+        # the final epoch completes, so 3 full epochs reads back as 3 here
+        # (not the older 0-indexed "last completed epoch" == 2 assumption).
+        assert res["epoch"] == 3
 
 
 # ── 4. metrics are populated after training ───────────────────────────────────
