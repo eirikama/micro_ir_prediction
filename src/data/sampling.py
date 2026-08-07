@@ -211,8 +211,12 @@ def get_training_data_hyperspectral(
                     for c, q in zip(sample_cores, s_quotas) if q > 0]
 
         if not s_sel:
-            print(f"  [warn] class '{label}' has no sample pixels — skipping")
-            continue
+            raise RuntimeError(
+                f"\n[Data Sampling Error] Class '{label}' has no sample pixels "
+                f"(0/{spectra_per_class} found).\n"
+                f"Check if background_max ({background_max}) or sample_min "
+                f"({sample_min}) are too restrictive."
+            )
 
         X_s = np.concatenate(s_sel, axis=0)
         all_spectra.append(X_s)

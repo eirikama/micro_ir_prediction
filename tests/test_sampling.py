@@ -39,7 +39,7 @@ def _make_zarr_root(n_images_per_class: int = 2) -> zarr.Group:
 # ── get_training_data ─────────────────────────────────────────────────────────
 
 def test_returns_correct_spectra_count():
-    from src.data.sampling import get_training_data
+    from src.data.sampling import get_training_data_hyperspectral as get_training_data
     root = _make_zarr_root()
     spectra_per_class = 8
 
@@ -60,7 +60,7 @@ def test_returns_correct_spectra_count():
 
 
 def test_label_encoding_covers_all_classes():
-    from src.data.sampling import get_training_data
+    from src.data.sampling import get_training_data_hyperspectral as get_training_data
     root = _make_zarr_root()
 
     with patch("src.data.sampling.zarr.open", return_value=root):
@@ -80,7 +80,7 @@ def test_label_encoding_covers_all_classes():
 
 
 def test_labels_and_spectra_same_length():
-    from src.data.sampling import get_training_data
+    from src.data.sampling import get_training_data_hyperspectral as get_training_data
     root = _make_zarr_root()
 
     with patch("src.data.sampling.zarr.open", return_value=root):
@@ -99,7 +99,7 @@ def test_labels_and_spectra_same_length():
 
 
 def test_wavenumbers_returned():
-    from src.data.sampling import get_training_data
+    from src.data.sampling import get_training_data_hyperspectral as get_training_data
     root = _make_zarr_root()
 
     with patch("src.data.sampling.zarr.open", return_value=root):
@@ -118,7 +118,7 @@ def test_wavenumbers_returned():
 
 
 def test_exceeding_attempts_raises():
-    from src.data.sampling import get_training_data
+    from src.data.sampling import get_training_data_hyperspectral as get_training_data
     # all-zero spectra: means <= 0 → sample_min=0.5 will never be satisfied
     store = zarr.MemoryStore()
     root  = zarr.open_group(store, mode="w")
