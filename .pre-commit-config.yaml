@@ -16,3 +16,8 @@ repos:
         files: \.(pyx|pxd|pxi)$
     -   id: ruff-format
         files: \.(pyx|pxd|pxi)$
+
+- repo: https://github.com/kynan/nbstripout
+  rev: 0.9.1
+  hooks:
+  - id: nbstripout
