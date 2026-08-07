@@ -1,6 +1,5 @@
-# Spectral Classification Pipeline
-
 <div align="center">
+# Spectral Classification Pipeline
 
 <!-- Status / CI -->
 [![tests](https://github.com/eirikama/micro_ir_prediction/actions/workflows/tests.yml/badge.svg)](https://github.com/eirikama/micro_ir_prediction/actions/workflows/tests.yml)
