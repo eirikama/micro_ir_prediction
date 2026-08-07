@@ -1,4 +1,5 @@
 <div align="center">
+
 # Spectral Classification Pipeline
 
 <!-- Status / CI -->
