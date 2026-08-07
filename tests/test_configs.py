@@ -20,6 +20,13 @@ from pathlib import Path
 import pytest
 from omegaconf import OmegaConf
 
+# config.yaml's defaults list references structured-config groups
+# (data_config, aacnn_config, trainer_config, inference_config) that are not
+# YAML files — main.py registers them into Hydra's ConfigStore at import
+# time. Importing main here (without calling it) triggers that registration
+# so compose() below can resolve them, same as it would for a real run.
+import main  # noqa: F401,E402
+
 # ── discover domains automatically ────────────────────────────────────────────
 
 _DOMAIN_DIR = Path(__file__).parent.parent / "configs" / "domain"

@@ -21,7 +21,7 @@ N_SPECTRA    = 48    # must be divisible by N_CLASSES for stratified split
 
 @pytest.fixture(scope="session")
 def model_cfg():
-    from src.configs.config_schema import ModelConfig
+    from src.config_schema import ModelConfig
     return OmegaConf.structured(ModelConfig(
         conv_channels=8,
         kernel_size=7,
