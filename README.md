@@ -28,11 +28,11 @@ full hyperspectral image cubes, producing per-pixel class probability maps.
 
 | Domain | Modality | Active augmentations |
 |---|---|---|
-| `microplastic` | IR  | Mie scattering, polynomial baseline (signal + background), CO2, noise |
-| `textile` | IR  | Mie scattering, polynomial baseline (signal + background), CO2, noise |
+| `microplastic` | IR  | Mie scattering, polynomial baseline, CO2, noise |
+| `textile` | IR  | Mie scattering, polynomial baseline, CO2, noise |
 | `pollen` | NIR  | Cylindrical Mie scattering, polynomial baseline, noise |
-| `milk` | IR (MIR) | Polynomial baseline (signal), noise, wavenumber shift, temperature perturbation |
-| `pcuk` | IR  | Polynomial baseline (signal), noise, CO2, paraffin, wavenumber shift |
+| `milk` | IR | Polynomial baseline, noise, wavenumber shift, temperature perturbation |
+| `pcuk` | IR  | Polynomial baseline, noise, CO2, paraffin, wavenumber shift |
 | `mlrod` | Raman | Cosmic ray spikes, fluorescence background (PCA-fitted), shot noise |
 | `bacteria` | Raman | Fluorescence background (PCA-fitted), shot noise |
 
