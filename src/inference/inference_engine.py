@@ -74,12 +74,6 @@ def inference_worker(
                     break
                 start, end = msg
                 data = flat_data_ram[start:end]
-                if False:
-                    mu = data.mean(axis=1, keepdims=True)
-                    sigma = data.std(axis=1, keepdims=True)
-                    data = (data - mu) / np.maximum(sigma, 1e-3)
-                    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-                chunk = torch.from_numpy(data).unsqueeze(1).to(device, non_blocking=True).half()
                 chunk = (
                     torch.from_numpy(data.astype(np.float32))
                     .unsqueeze(1)
@@ -102,38 +96,61 @@ def inference_worker(
         output_queue.put((-1, None))
 
 
-def run_inference(
-    cfg: DictConfig | None = None,
-    image_name: str = "",
-    ckpt_path: str = "",
-    batch_size: int = 512,
-    zarr_path: str | None = None,
-    devices: list[int] | None = None,
+def _run_inference_single_gpu(
+    gpu_id: int,
+    ckpt_path: str,
+    zarr_path: str,
+    image_name: str,
+    batch_size: int,
 ) -> np.ndarray:
-    """Run pixel-wise inference on one image.
+    """Direct, no-multiprocessing inference for one image on one GPU.
 
-    Can be called with a full Hydra cfg (as in main.py) or standalone with
-    explicit arguments — cfg is not required when zarr_path and devices are
-    provided directly.
-
-    Args:
-        cfg:        Hydra DictConfig (optional — used by main.py).
-        image_name: Key of the image inside the zarr store.
-        ckpt_path:  Path to the Lightning checkpoint.
-        batch_size: Number of pixels per GPU batch.
-        zarr_path:  Path to the zarr store. Falls back to cfg.data.zarr_path
-                    when cfg is provided and zarr_path is None.
-        devices:    List of GPU ids, e.g. [0] or [0, 1]. Defaults to [0] when
-                    cfg is not provided.
+    Skips the process spawn, CUDA-context init, and queue IPC that
+    _run_inference_multi_gpu pays even when there's only one device to use.
+    For this codebase's small AACNN model those fixed per-image costs
+    typically dwarf the actual forward-pass time, so this path is not just
+    simpler but usually faster whenever only one GPU is configured. Falls
+    back to CPU if CUDA isn't available (e.g. local/dev machines).
     """
-    if cfg is not None:
-        zarr_path = zarr_path or cfg.data.zarr_path
-        devices   = list(cfg.inference.devices)
-    else:
-        if not zarr_path:
-            raise ValueError("zarr_path is required when cfg is not provided")
-        devices = list(devices) if devices is not None else [0]
+    device = torch.device(f"cuda:{gpu_id}") if torch.cuda.is_available() else torch.device("cpu")
+    model = AACNN.load_from_checkpoint(ckpt_path, weights_only=False).to(device).half()
+    model.eval()
 
+    z_arr, H, W, Bands = _open_z_arr(zarr_path, image_name)
+    flat_data  = z_arr[:].reshape(-1, Bands)
+    num_pixels = H * W
+    prob_map   = None
+
+    with torch.inference_mode():
+        for start in range(0, num_pixels, batch_size):
+            end   = min(start + batch_size, num_pixels)
+            chunk = (
+                torch.from_numpy(flat_data[start:end].astype(np.float32))
+                .unsqueeze(1)
+                .to(device, non_blocking=True)
+                .half()
+            )
+            probs = F.softmax(model(chunk), dim=1).cpu().numpy()
+            if prob_map is None:
+                n_classes = probs.shape[1]
+                prob_map  = np.zeros((num_pixels, n_classes), dtype=np.float16)
+            prob_map[start:end] = probs
+
+    del model
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
+    return prob_map.reshape(H, W, n_classes)
+
+
+def _run_inference_multi_gpu(
+    devices: list[int],
+    ckpt_path: str,
+    zarr_path: str,
+    image_name: str,
+    batch_size: int,
+) -> np.ndarray:
+    """Split one image's pixels across len(devices) GPU worker processes."""
     _, H, W, Bands = _open_z_arr(zarr_path, image_name)  # shape only, workers load data
     num_pixels = H * W
 
@@ -170,6 +187,54 @@ def run_inference(
         p.join()
 
     return prob_map.reshape(H, W, n_classes)
+
+
+def run_inference(
+    cfg: DictConfig | None = None,
+    image_name: str = "",
+    ckpt_path: str = "",
+    batch_size: int = 512,
+    zarr_path: str | None = None,
+    devices: list[int] | None = None,
+) -> np.ndarray:
+    """Run pixel-wise inference on one image.
+
+    Dispatches at runtime purely on how many entries are in `devices`
+    (from cfg.inference.devices, or passed explicitly) — no separate flag
+    needed, since the device list is already the single source of truth
+    for "how many GPUs, and which ones":
+      - 0 or 1 devices → _run_inference_single_gpu: loads the model and
+        runs directly in this process, no multiprocessing.
+      - 2+ devices     → _run_inference_multi_gpu: the mp.Process worker
+        pool, splitting this image's pixels across all listed GPUs.
+
+    Can be called with a full Hydra cfg (as in main.py) or standalone with
+    explicit arguments — cfg is not required when zarr_path and devices are
+    provided directly.
+
+    Args:
+        cfg:        Hydra DictConfig (optional — used by main.py).
+        image_name: Key of the image inside the zarr store.
+        ckpt_path:  Path to the Lightning checkpoint.
+        batch_size: Number of pixels per GPU batch.
+        zarr_path:  Path to the zarr store. Falls back to cfg.data.zarr_path
+                    when cfg is provided and zarr_path is None.
+        devices:    List of GPU ids, e.g. [0] or [0, 1]. Defaults to [0] when
+                    cfg is not provided.
+    """
+    if cfg is not None:
+        zarr_path = zarr_path or cfg.data.zarr_path
+        devices   = list(cfg.inference.devices)
+    else:
+        if not zarr_path:
+            raise ValueError("zarr_path is required when cfg is not provided")
+        devices = list(devices) if devices is not None else [0]
+
+    if len(devices) <= 1:
+        gpu_id = devices[0] if devices else 0
+        return _run_inference_single_gpu(gpu_id, ckpt_path, zarr_path, image_name, batch_size)
+
+    return _run_inference_multi_gpu(devices, ckpt_path, zarr_path, image_name, batch_size)
 
 
 def predict_array(
