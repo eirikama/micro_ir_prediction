@@ -1,15 +1,28 @@
 # Spectral Classification Pipeline
 
-![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
-![Hydra](https://img.shields.io/badge/Hydra-1.3-89b4fa?logo=python&logoColor=white)
-![Optuna](https://img.shields.io/badge/Optuna-3.x-2979FF?logo=python&logoColor=white)
-![MLflow](https://img.shields.io/badge/MLflow-tracking-0194E2?logo=mlflow&logoColor=white)
-![Zarr](https://img.shields.io/badge/Zarr-LMDB-orange)
-![Docker](https://img.shields.io/badge/Docker-24.0-2496ED?logo=docker&logoColor=white)
+<div align="center">
+
+<!-- Status / CI -->
 [![tests](https://github.com/eirikama/micro_ir_prediction/actions/workflows/tests.yml/badge.svg)](https://github.com/eirikama/micro_ir_prediction/actions/workflows/tests.yml)
 ![coverage](https://raw.githubusercontent.com/eirikama/micro_ir_prediction/master/coverage.svg)
 
-Deep learning pipeline for classification of spectral data and hyperspectral microscopy images across multiple material domains. Trains a 1D attention-augmented convolutional neural network (AACNN) on synthetically augmented reference spectra and runs GPU-accelerated pixel-wise inference over full hyperspectral image cubes, producing per-pixel class probability maps.
+<!-- Tech stack -->
+![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
+![Hydra](https://img.shields.io/badge/Hydra-1.3-89b4fa?style=flat-square&logo=python&logoColor=white)
+![Optuna](https://img.shields.io/badge/Optuna-3.x-2979FF?style=flat-square&logo=optuna&logoColor=white)
+![MLflow](https://img.shields.io/badge/MLflow-tracking-0194E2?style=flat-square&logo=mlflow&logoColor=white)
+![Zarr](https://img.shields.io/badge/Zarr-LMDB-orange?style=flat-square)
+![Docker](https://img.shields.io/badge/Docker-24.0-2496ED?style=flat-square&logo=docker&logoColor=white)
+
+</div>
+
+Deep learning pipeline for classification of spectral data and hyperspectral
+microscopy images across multiple material domains. Trains a 1D
+attention-augmented convolutional neural network (AACNN) on synthetically
+augmented reference spectra and runs GPU-accelerated pixel-wise inference over
+full hyperspectral image cubes, producing per-pixel class probability maps.
+
+
 
 **Supported domains:**
 
@@ -18,6 +31,8 @@ Deep learning pipeline for classification of spectral data and hyperspectral mic
 | `microplastic` | IR  | Mie scattering, polynomial baseline (signal + background), CO2, noise |
 | `textile` | IR  | Mie scattering, polynomial baseline (signal + background), CO2, noise |
 | `pollen` | NIR  | Cylindrical Mie scattering, polynomial baseline, noise |
+| `milk` | IR (MIR) | Polynomial baseline (signal), noise, wavenumber shift, temperature perturbation |
+| `pcuk` | IR  | Polynomial baseline (signal), noise, CO2, paraffin, wavenumber shift |
 | `mlrod` | Raman | Cosmic ray spikes, fluorescence background (PCA-fitted), shot noise |
 | `bacteria` | Raman | Fluorescence background (PCA-fitted), shot noise |
 
@@ -30,14 +45,10 @@ Each domain has its own config subtree under `configs/domain/`. All domains shar
 The pipeline:
 
 1. Samples reference spectra from Zarr image cubes with balanced per-class sampling
-2. Applies domain-appropriate synthetic augmentation on every training batch (online, fresh each epoch)
+2. Applies domain-appropriate synthetic augmentation online on every training batch
 3. Trains an AACNN with focal loss, mixed-precision, and early stopping
 4. Runs pixel-wise inference over held-out image cubes, saving per-pixel probability maps
 5. Tracks all experiments (params, metrics, checkpoints, git state) with MLflow
-
-Validation is controlled by `data.intrinsic_validation`:
-- `True` — stratified train/test split from the single training zarr
-- `False` — train on the full training zarr, evaluate on a separate test zarr
 
 ---
 
@@ -61,6 +72,8 @@ micro_ir_prediction/
 │   │   │   ├── optuna_microplastic.yaml
 │   │   │   ├── optuna_textile.yaml
 │   │   │   ├── optuna_pollen.yaml
+│   │   │   ├── optuna_milk.yaml
+│   │   │   ├── optuna_pcuk.yaml
 │   │   │   ├── optuna_mlrod.yaml
 │   │   │   └── optuna_bacteria.yaml
 │   │   └── launcher/
@@ -72,14 +85,14 @@ micro_ir_prediction/
 │           ├── model/aacnn.yaml         # num_classes, lr, architecture
 │           ├── trainer/default.yaml     # epochs, patience, precision
 │           └── inference/default.yaml  # batch size, pred_store_path, ckpt_path
-│           (same layout for pollen/, textile/, mlrod/, bacteria/)
+│           (same layout for pollen/, textile/, milk/, pcuk/, mlrod/, bacteria/)
 │
 ├── slurm/
 │   ├── train.sh                         # single training job 
 │   └── sweep.sh                         # parallel sweep job array 
 │
 └── src/
-    ├── configs/config_schema.py         # typed dataclass config definitions
+    ├── config_schema.py                 # typed dataclass config definitions
     ├── data/
     │   ├── augmentation.py              # IR and Raman augmentation registry
     │   ├── datamodule.py                # SpectralDataModule; fluorescence fit in setup()
@@ -175,7 +188,7 @@ All parameters are controlled via Hydra. Select a domain with `domain=<name>`; a
 
 | Parameter | Default location | Description |
 |---|---|---|
-| `domain` | `config.yaml` | `microplastic`, `pollen`, `textile`, `mlrod`, `bacteria` |
+| `domain` | `config.yaml` | `microplastic`, `pollen`, `textile`, `milk`, `pcuk`, `mlrod`, `bacteria` |
 | `mode` | `config.yaml` | `train`, `infer`, or `all` |
 | `seed` | `config.yaml` | global random seed |
 | `data.spectra_per_class` | `domain/.../data/default.yaml` | reference spectra sampled per class |
@@ -406,7 +419,7 @@ Before submitting, edit `slurm/sweep.sh` to set:
 
 Augmentations are applied online inside each training batch, dispatched through `AUG_REGISTRY` in `src/data/augmentation.py`. The `fluorescence` PCA basis is fitted once inside `SpectralDataModule.setup()` before training starts.
 
-### IR domains (microplastic, textile, pollen)
+### IR domains (microplastic, textile, pollen, pcuk)
 
 | Registry key | Config key(s) | Description |
 |---|---|---|
@@ -414,6 +427,19 @@ Augmentations are applied online inside each training batch, dispatched through 
 | `polynomial_baseline` | `polynomial_baseline_signal`, `polynomial_baseline_background` | Additive polynomial baseline, applied to signal and background pixels separately |
 | `noise` | `noise` | Additive white Gaussian noise |
 | `co2_peaks` | `co2_peaks` | Synthetic CO₂ absorption peaks |
+| `paraffin` | `paraffin` | Synthetic paraffin absorption peaks (histology sample prep artifact — used by `pcuk`) |
+| `wavenumber_shift` | `wavenumber_shift` | Random rigid shift along the spectral axis (instrument calibration drift) |
+
+### Wet milk MIR domain (milk)
+
+`milk` draws from the shared IR set above (`polynomial_baseline`, `noise`, `wavenumber_shift` are all active in its default config) plus a milk-specific group in `AUG_REGISTRY`:
+
+| Registry key | Config key | Description |
+|---|---|---|
+| `temperature_perturbation` | `temperature_perturbation` | Simulates sample-temperature drift between measurements (active by default) |
+| `homogenizer_degradation` | `homogenizer_degradation` | Simulates fat-globule breakdown from homogenization (registered, not in `milk`'s default config) |
+| `preservative_effect` | `preservative_effect` | Simulates preservative-induced spectral shift (registered, not in `milk`'s default config) |
+| `dilution` | `dilution` | Simulates sample dilution (registered, not in `milk`'s default config) |
 
 ### Raman domains (mlrod, bacteria)
 
