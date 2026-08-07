@@ -32,7 +32,7 @@ def _make_cfg(batch_size: int = 16, max_epochs: int = 2, val_split: float = 0.5)
     """Return a minimal Hydra-style config for training tests."""
     from src.config_schema import ModelConfig, TrainerConfig
     model_cfg   = OmegaConf.structured(ModelConfig(
-        conv_channels=8, kernel_size=7, pred_dropout=0.0,
+        conv_channels=16, kernel_size=7, pred_dropout=0.0,
         num_classes=N_CLASSES, gamma=0.0,
         alpha=[1.0] * N_CLASSES, lr=1e-4, weight_decay=0.0,
     ))

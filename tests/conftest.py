@@ -23,7 +23,7 @@ N_SPECTRA    = 48    # must be divisible by N_CLASSES for stratified split
 def model_cfg():
     from src.config_schema import ModelConfig
     return OmegaConf.structured(ModelConfig(
-        conv_channels=8,
+        conv_channels=16,
         kernel_size=7,
         pred_dropout=0.0,
         num_classes=N_CLASSES,
