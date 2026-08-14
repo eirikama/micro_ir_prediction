@@ -198,8 +198,16 @@ def augment_cosmic_rays(
         hi     = min(p, c + w // 2 + 1)
         length = hi - lo
 
-        if length == 1:
-            shape = torch.ones(1, device=device)
+        if length <= 2:
+            # A window this narrow (only reachable when a spike center
+            # near either edge of the spectrum gets clipped asymmetrically
+            # by lo=max(0,...)/hi=min(p,...), producing an even length as
+            # small as 2) has no room to taper — a flat top is the closest
+            # sensible shape. length==2 previously fell into the general
+            # branch below, where linspace(0.0, 1.0, steps=1) degenerates
+            # to a single-point [0.0], making both halves all-zero and
+            # `shape / shape.max()` a 0/0 -> NaN.
+            shape = torch.ones(length, device=device)
         else:
             half  = torch.linspace(0.0, 1.0, (length + 1) // 2, device=device)
             shape = torch.cat([half, half[:-1].flip(0)]) if length % 2 != 0 \
