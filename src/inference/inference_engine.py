@@ -10,6 +10,13 @@ from src.models.aacnn import AACNN
 
 
 def _open_z_arr(zarr_path: str, image_name: str):
+    """Return a *lazy* handle to an image's spectra plus its shape.
+
+    Importantly this never materialises the array — the caller reads only
+    the pixel ranges it actually needs via `_read_pixel_range`, so opening
+    an image costs ~nothing and holding many open handles (e.g. one per GPU
+    worker) doesn't multiply memory use.
+    """
     store = zarr.open(zarr_path, mode="r")
 
     if "images" in store and image_name in store["images"]:
@@ -23,10 +30,9 @@ def _open_z_arr(zarr_path: str, image_name: str):
 
         elif "X" in grp:
             # PCUK layout: flat annotated spectra (N, n_wn)
-            X     = grp["X"][:]
-            z_arr = X[:, np.newaxis, :]   # (N, 1, n_wn)
-            H, W, Bands = z_arr.shape
-            return z_arr, H, W, Bands
+            z_arr = grp["X"]
+            N, Bands = z_arr.shape
+            return z_arr, N, 1, Bands
 
         else:
             raise KeyError(
@@ -36,10 +42,9 @@ def _open_z_arr(zarr_path: str, image_name: str):
 
     elif image_name in store:
         # legacy test-store layout: <name>/X at root level
-        X     = store[f"{image_name}/X"][:]
-        z_arr = X[:, np.newaxis, :]
-        H, W, Bands = z_arr.shape
-        return z_arr, H, W, Bands
+        z_arr = store[f"{image_name}/X"]
+        N, Bands = z_arr.shape
+        return z_arr, N, 1, Bands
 
     else:
         raise KeyError(
@@ -48,84 +53,45 @@ def _open_z_arr(zarr_path: str, image_name: str):
         )
 
 
+def _read_pixel_range(z_arr, W: int, Bands: int, start: int, end: int) -> np.ndarray:
+    """Read pixels [start, end) of the flattened (H*W) index range directly
+    off the zarr array, without ever loading the whole image into RAM.
 
-def inference_worker(
-    gpu_id: int,
-    ckpt_path: str,
-    input_queue: mp.Queue,
-    output_queue: mp.Queue,
-    zarr_path: str,
-    image_name: str,
-) -> None:
-    try:
-        device = torch.device(f"cuda:{gpu_id}")
-        model = AACNN.load_from_checkpoint(ckpt_path, weights_only=False).to(device).half()
-        model.eval()
-
-        z_arr, H, W, Bands = _open_z_arr(zarr_path, image_name)  # ← shared helper
-        flat_data_ram = z_arr[:].reshape(-1, Bands)
-        del z_arr
-        gc.collect()
-
-        with torch.inference_mode():
-            while True:
-                msg = input_queue.get()
-                if msg is None:
-                    break
-                start, end = msg
-                data = flat_data_ram[start:end]
-                chunk = (
-                    torch.from_numpy(data.astype(np.float32))
-                    .unsqueeze(1)
-                    .to(device, non_blocking=True)
-                    .half()
-                )
-                logits = model(chunk)
-                probs = F.softmax(logits, dim=1)
-                output_queue.put((start, probs.cpu().numpy()))
-                del data, chunk
-
-    except Exception as e:
-        import traceback
-        print(f"[worker gpu={gpu_id}] CRASHED: {e}", flush=True)
-        traceback.print_exc()
-        while True:
-            msg = input_queue.get()
-            if msg is None:
-                break
-        output_queue.put((-1, None))
-
-
-def _run_inference_single_gpu(
-    gpu_id: int,
-    ckpt_path: str,
-    zarr_path: str,
-    image_name: str,
-    batch_size: int,
-) -> np.ndarray:
-    """Direct, no-multiprocessing inference for one image on one GPU.
-
-    Skips the process spawn, CUDA-context init, and queue IPC that
-    _run_inference_multi_gpu pays even when there's only one device to use.
-    For this codebase's small AACNN model those fixed per-image costs
-    typically dwarf the actual forward-pass time, so this path is not just
-    simpler but usually faster whenever only one GPU is configured. Falls
-    back to CPU if CUDA isn't available (e.g. local/dev machines).
+    - Flat layout (z_arr.ndim == 2, W == 1): pixel index == row index, so
+      it's a straight chunked slice.
+    - Spatial cube layout (z_arr.ndim == 3): translate the flat range into
+      the whole rows that cover it, slice those (zarr only pulls the
+      chunks it needs), then trim to the exact pixel range.
     """
-    device = torch.device(f"cuda:{gpu_id}") if torch.cuda.is_available() else torch.device("cpu")
+    if z_arr.ndim == 2:
+        return np.asarray(z_arr[start:end])
+
+    row_start = start // W
+    row_end   = (end - 1) // W + 1
+    rows = np.asarray(z_arr[row_start:row_end]).reshape(-1, Bands)
+    lo = start - row_start * W
+    return rows[lo: lo + (end - start)]
+
+
+def _load_model(ckpt_path: str, device: torch.device):
     model = AACNN.load_from_checkpoint(ckpt_path, weights_only=False).to(device).half()
     model.eval()
+    return model
 
-    z_arr, H, W, Bands = _open_z_arr(zarr_path, image_name)
-    flat_data  = z_arr[:].reshape(-1, Bands)
+
+def _infer_batches(model, device: torch.device, z_arr, H: int, W: int, Bands: int, batch_size: int) -> np.ndarray:
+    """Run the model over one image's pixels in batches, reading each batch
+    lazily from `z_arr`. Shared by the single-GPU path and each persistent
+    worker's per-task handling."""
     num_pixels = H * W
     prob_map   = None
 
     with torch.inference_mode():
         for start in range(0, num_pixels, batch_size):
             end   = min(start + batch_size, num_pixels)
+            data  = _read_pixel_range(z_arr, W, Bands, start, end)
             chunk = (
-                torch.from_numpy(flat_data[start:end].astype(np.float32))
+                torch.from_numpy(data.astype(np.float32))
                 .unsqueeze(1)
                 .to(device, non_blocking=True)
                 .half()
@@ -136,57 +102,161 @@ def _run_inference_single_gpu(
                 prob_map  = np.zeros((num_pixels, n_classes), dtype=np.float16)
             prob_map[start:end] = probs
 
-    del model
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-
-    return prob_map.reshape(H, W, n_classes)
+    return prob_map.reshape(H, W, prob_map.shape[-1])
 
 
-def _run_inference_multi_gpu(
-    devices: list[int],
+def _persistent_gpu_worker(
+    gpu_id: int,
     ckpt_path: str,
-    zarr_path: str,
-    image_name: str,
-    batch_size: int,
-) -> np.ndarray:
-    """Split one image's pixels across len(devices) GPU worker processes."""
-    _, H, W, Bands = _open_z_arr(zarr_path, image_name)  # shape only, workers load data
-    num_pixels = H * W
+    task_queue: mp.Queue,
+    output_queue: mp.Queue,
+) -> None:
+    """Long-lived worker: loads the checkpoint once, then serves batches for
+    however many images are sent its way until it receives the sentinel.
 
-    input_queue  = mp.Queue()
-    output_queue = mp.Queue()
-    processes    = []
+    Replaces the old design where a fresh process (and a fresh checkpoint
+    load) was spawned per image. It also never loads a full image into RAM
+    — each task carries a pixel range, read lazily via `_read_pixel_range`.
 
-    for gpu_id in devices:
-        p = mp.Process(
-            target=inference_worker,
-            args=(gpu_id, ckpt_path, input_queue, output_queue, zarr_path, image_name),
-        )
-        p.start()
-        processes.append(p)
+    Tasks and results are tagged with an `epoch` (bumped once per `infer()`
+    call by the session). Queues are now shared across the whole run rather
+    than recreated per image, so if a worker dies mid-image any message it
+    already had in flight — or a straggler from a worker that's simply slow
+    — must not be mistaken for a result belonging to the *next* image.
+    Tagging lets the receiver (`InferenceSession._infer_multi`) discard
+    anything that isn't from the epoch it's currently waiting on.
+    """
+    epoch = 0
+    try:
+        device = torch.device(f"cuda:{gpu_id}")
+        model  = _load_model(ckpt_path, device)
 
-    for i in range(0, num_pixels, batch_size):
-        input_queue.put((i, min(i + batch_size, num_pixels)))
-    for _ in range(len(processes)):
-        input_queue.put(None)
+        cached_key = None
+        cached_arr = cached_W = cached_Bands = None
 
-    num_batches = (num_pixels + batch_size - 1) // batch_size
-    prob_map    = None
+        with torch.inference_mode():
+            while True:
+                msg = task_queue.get()
+                if msg is None:
+                    break
+                epoch, zarr_path, image_name, start, end = msg
 
-    for _ in range(num_batches):
-        start_idx, probs = output_queue.get()
-        if start_idx == -1:
-            raise RuntimeError(f"inference_worker crashed for {image_name}")
-        if prob_map is None:
-            n_classes = probs.shape[1]
-            prob_map  = np.zeros((num_pixels, n_classes), dtype=np.float16)
-        prob_map[start_idx: start_idx + len(probs)] = probs
+                key = (zarr_path, image_name)
+                if key != cached_key:
+                    cached_arr, _, cached_W, cached_Bands = _open_z_arr(zarr_path, image_name)
+                    cached_key = key
 
-    for p in processes:
-        p.join()
+                data = _read_pixel_range(cached_arr, cached_W, cached_Bands, start, end)
+                chunk = (
+                    torch.from_numpy(data.astype(np.float32))
+                    .unsqueeze(1)
+                    .to(device, non_blocking=True)
+                    .half()
+                )
+                probs = F.softmax(model(chunk), dim=1).cpu().numpy()
+                output_queue.put((epoch, start, probs))
 
-    return prob_map.reshape(H, W, n_classes)
+    except Exception as e:
+        import traceback
+        print(f"[worker gpu={gpu_id}] CRASHED: {e}", flush=True)
+        traceback.print_exc()
+        output_queue.put((epoch, -1, None))
+
+
+class InferenceSession:
+    """Holds a loaded model (single GPU) or a pool of persistent GPU worker
+    processes (multi-GPU) for the lifetime of an inference run.
+
+    Use this instead of calling `run_inference` in a loop — it loads the
+    checkpoint exactly once per device instead of once per image, and reads
+    input data lazily per batch instead of materialising a full image per
+    call. Use as a context manager so workers are always torn down:
+
+        with InferenceSession(ckpt_path, devices=[0, 1], batch_size=512) as sess:
+            for img in test_images:
+                prob_map = sess.infer(zarr_path, img["name"])
+    """
+
+    def __init__(self, ckpt_path: str, devices: list[int] | None = None, batch_size: int = 512):
+        self.ckpt_path  = ckpt_path
+        self.devices    = list(devices) if devices else [0]
+        self.batch_size = batch_size
+        self.multi_gpu  = len(self.devices) > 1
+        self._closed    = False
+        self._epoch     = 0
+
+        if self.multi_gpu:
+            self.task_queue   = mp.Queue()
+            self.output_queue = mp.Queue()
+            self.workers = [
+                mp.Process(
+                    target=_persistent_gpu_worker,
+                    args=(gpu_id, ckpt_path, self.task_queue, self.output_queue),
+                )
+                for gpu_id in self.devices
+            ]
+            for w in self.workers:
+                w.start()
+        else:
+            gpu_id = self.devices[0] if self.devices else 0
+            self.device = torch.device(f"cuda:{gpu_id}") if torch.cuda.is_available() else torch.device("cpu")
+            self.model  = _load_model(ckpt_path, self.device)
+
+    def infer(self, zarr_path: str, image_name: str) -> np.ndarray:
+        z_arr, H, W, Bands = _open_z_arr(zarr_path, image_name)
+        if not self.multi_gpu:
+            return _infer_batches(self.model, self.device, z_arr, H, W, Bands, self.batch_size)
+        return self._infer_multi(zarr_path, image_name, H, W, Bands)
+
+    def _infer_multi(self, zarr_path: str, image_name: str, H: int, W: int, Bands: int) -> np.ndarray:
+        self._epoch += 1
+        epoch       = self._epoch
+        num_pixels  = H * W
+        starts      = list(range(0, num_pixels, self.batch_size))
+        for start in starts:
+            end = min(start + self.batch_size, num_pixels)
+            self.task_queue.put((epoch, zarr_path, image_name, start, end))
+
+        prob_map  = None
+        n_classes = None
+        received  = 0
+        while received < len(starts):
+            tag, start, probs = self.output_queue.get()
+            if start == -1:
+                raise RuntimeError(f"inference worker crashed on {image_name}")
+            if tag != epoch:
+                # Straggler from a previous (possibly crashed) image's tasks
+                # — the queues are shared across the whole run, so discard
+                # anything that isn't from the epoch we're waiting on.
+                continue
+            if prob_map is None:
+                n_classes = probs.shape[1]
+                prob_map  = np.zeros((num_pixels, n_classes), dtype=np.float16)
+            prob_map[start:start + len(probs)] = probs
+            received += 1
+
+        return prob_map.reshape(H, W, n_classes)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self.multi_gpu:
+            for _ in self.workers:
+                self.task_queue.put(None)
+            for w in self.workers:
+                w.join()
+        else:
+            del self.model
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+        gc.collect()
+
+    def __enter__(self) -> "InferenceSession":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
 
 def run_inference(
@@ -199,14 +269,20 @@ def run_inference(
 ) -> np.ndarray:
     """Run pixel-wise inference on one image.
 
+    Convenience one-shot wrapper around `InferenceSession` for callers that
+    only need a single image (e.g. `predict.py`). For a full test set,
+    open one `InferenceSession` and call `.infer(...)` per image instead —
+    this function reloads the checkpoint every call, which is exactly the
+    per-image reload cost `InferenceSession` exists to avoid.
+
     Dispatches at runtime purely on how many entries are in `devices`
     (from cfg.inference.devices, or passed explicitly) — no separate flag
     needed, since the device list is already the single source of truth
     for "how many GPUs, and which ones":
-      - 0 or 1 devices → _run_inference_single_gpu: loads the model and
-        runs directly in this process, no multiprocessing.
-      - 2+ devices     → _run_inference_multi_gpu: the mp.Process worker
-        pool, splitting this image's pixels across all listed GPUs.
+      - 0 or 1 devices → loads the model and runs directly in this
+        process, no multiprocessing.
+      - 2+ devices     → a short-lived worker pool, splitting this image's
+        pixels across all listed GPUs.
 
     Can be called with a full Hydra cfg (as in main.py) or standalone with
     explicit arguments — cfg is not required when zarr_path and devices are
@@ -230,11 +306,8 @@ def run_inference(
             raise ValueError("zarr_path is required when cfg is not provided")
         devices = list(devices) if devices is not None else [0]
 
-    if len(devices) <= 1:
-        gpu_id = devices[0] if devices else 0
-        return _run_inference_single_gpu(gpu_id, ckpt_path, zarr_path, image_name, batch_size)
-
-    return _run_inference_multi_gpu(devices, ckpt_path, zarr_path, image_name, batch_size)
+    with InferenceSession(ckpt_path, devices=devices, batch_size=batch_size) as session:
+        return session.infer(zarr_path, image_name)
 
 
 def predict_array(

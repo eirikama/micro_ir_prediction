@@ -10,7 +10,7 @@ import numpy as np
 import zarr
 from omegaconf import DictConfig
 
-from src.inference.inference_engine import run_inference
+from src.inference.inference_engine import InferenceSession
 from src.inference.export_inference import open_pred_store, save_inference_outputs_zarr
 from src.tracking.base import Tracker
 
@@ -28,11 +28,13 @@ def run_inference_pipeline(
     image_metrics: list[dict] = []
     failed:        list[str]  = []
 
-    is_pcuk = not cfg.data.hyperspectra
-    print(is_pcuk)
+    # True for "flat" annotated-spectra stores (PCUK, bacteria, milk, ...);
+    # False for spatial hyperspectral cubes (microplastics, pollen, ...).
+    is_flat_layout = not cfg.data.hyperspectra
+    log.debug("is_flat_layout=%s", is_flat_layout)
 
     # open the right store for ground truth
-    if is_pcuk:
+    if is_flat_layout:
         root_gt = zarr.open(
             cfg.data.zarr_path
             if cfg.data.intrinsic_validation
@@ -49,7 +51,21 @@ def run_inference_pipeline(
     log.info("Starting inference on %d images...", len(test_images))
     t_infer_start = time.time()
 
-    with open_pred_store(cfg.inference.pred_store_path) as pred_store:
+    # One model load (or one persistent worker pool for multi-GPU) reused
+    # across every image below — the checkpoint used to be reloaded from
+    # disk per image (and per GPU worker), which dominated inference time.
+    inference_zarr_path = (
+        cfg.data.zarr_path
+        if cfg.data.intrinsic_validation
+        else cfg.data.zarr_test_path
+    )
+
+    with open_pred_store(cfg.inference.pred_store_path) as pred_store, \
+         InferenceSession(
+             ckpt_path=cfg.inference.ckpt_path,
+             devices=list(cfg.inference.devices),
+             batch_size=cfg.inference.batch_size,
+         ) as inference_session:
         for i, img_data in enumerate(test_images):
             img_name  = img_data["name"]
             img_label = img_data["label"]
@@ -59,28 +75,24 @@ def run_inference_pipeline(
 
             try:
                 t0 = time.time()
-                zarr_path = (
-                    cfg.data.zarr_path
-                    if cfg.data.intrinsic_validation
-                    else cfg.data.zarr_test_path
-                )
-                prob_map = run_inference(
-                    cfg,
-                    image_name=img_name,
-                    ckpt_path=cfg.inference.ckpt_path,
-                    batch_size=cfg.inference.batch_size,
-                    zarr_path=zarr_path,
-                )
+                prob_map = inference_session.infer(inference_zarr_path, img_name)
 
                 # ── ground truth ──────────────────────────────────────────
-                if is_pcuk:
+                # is_flat_layout doesn't guarantee per-pixel "y" labels exist
+                # — PCUK/bacteria tissue cores carry them, but milk (also
+                # flat-layout, also intrinsic_validation) is single-label-
+                # per-sample data with no "y" array. Check for it rather
+                # than assuming, so datasets without it fall back to the
+                # same single-label path non-flat intrinsic datasets use.
+                has_pixel_gt = is_flat_layout and "y" in root_gt["images"][img_name]
+                if has_pixel_gt:
                     # per-pixel labels from store
                     y_true = root_gt["images"][img_name]["y"][:]  # (N,) int8
                 else:
-                    if cfg.data.intrinsic_validation:
-                        y_true = label_encoding.get(img_label)    # single int
-                    else:
+                    if not is_flat_layout and not cfg.data.intrinsic_validation:
                         y_true = root_test[img_name]["y"][:]
+                    else:
+                        y_true = label_encoding.get(img_label)    # single int
 
                 save_inference_outputs_zarr(
                     prob_map       = prob_map,
@@ -102,7 +114,7 @@ def run_inference_pipeline(
                 argmax = prob_map.reshape(-1, prob_map.shape[-1]).argmax(-1)
 
                 # ── accuracy logging ──────────────────────────────────────
-                if is_pcuk:
+                if has_pixel_gt:
                     # per-class accuracy using per-pixel GT
                     acc_overall = float(np.mean(argmax == y_true))
                     for class_name, class_idx in label_encoding.items():
@@ -121,7 +133,7 @@ def run_inference_pipeline(
                     )
                     acc = acc_overall
 
-                elif not cfg.data.intrinsic_validation:
+                elif not is_flat_layout and not cfg.data.intrinsic_validation:
                     # original spatial path — one label per image
                     acc_overall  = float(np.mean(argmax == y_true))
                     class_counts = dict(root_test[img_name].attrs["class_counts"])

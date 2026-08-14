@@ -94,18 +94,15 @@ def _save_spatial(
     chunk_hwk = (*chunk_hw, min(top_k_save, n_classes))
 
     img_grp = store.require_group(f"{trial_id}/{image_name}")
-    img_grp.attrs.update({
-        "true_idx":       true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
-        "N": N, "seed": seed, "trial_id": trial_id,
-        "background_idx": background_idx,
-        "n_classes":      n_classes,
-        "top_k_saved":    top_k_save,
-        "H": H, "W": W,
-        "layout":         "spatial",
-        "aug":            aug_summary or {},
-        **(hparams or {}),
-    })
 
+    # Write the data arrays first, attrs last (with a "complete" marker).
+    # A group's attrs — including "layout" — used to be written before its
+    # arrays, so a hard crash mid-save (OOM kill, worker crash) could leave
+    # a group that *looks* valid (has "layout") but is missing the arrays a
+    # reader expects, raising a bare KeyError far later during analysis.
+    # Writing arrays first means a crash before attrs are set leaves a group
+    # with no attrs at all — readers should treat that (or a missing/False
+    # "complete" attr) as incomplete and skip it.
     img_grp.array("argmax_map",
         np.argmax(prob_map, axis=-1).astype(np.uint8),
         dtype="u1", overwrite=True, chunks=chunk_hw, compressor=compressor)
@@ -127,6 +124,19 @@ def _save_spatial(
         top_k_prob.reshape(H, W, top_k).astype(np.float16),
         dtype="float16", overwrite=True, chunks=chunk_hwk, compressor=compressor)
 
+    img_grp.attrs.update({
+        "true_idx":       true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
+        "N": N, "seed": seed, "trial_id": trial_id,
+        "background_idx": background_idx,
+        "n_classes":      n_classes,
+        "top_k_saved":    top_k_save,
+        "H": H, "W": W,
+        "layout":         "spatial",
+        "aug":            aug_summary or {},
+        **(hparams or {}),
+        "complete":       True,
+    })
+
 
 def _save_flat(
     prob_map, image_name, store, trial_id,
@@ -140,18 +150,11 @@ def _save_flat(
     chunkk = (min(n_pixels, 4096), top_k)
 
     img_grp = store.require_group(f"{trial_id}/{image_name}")
-    img_grp.attrs.update({
-        "true_idx":       true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
-        "N": N, "seed": seed, "trial_id": trial_id,
-        "background_idx": background_idx,
-        "n_classes":      n_classes,
-        "top_k_saved":    top_k,
-        "n_pixels":       n_pixels,
-        "layout":         "flat",
-        "aug":            aug_summary or {},
-        **(hparams or {}),
-    })
 
+    # Arrays first, attrs (with "complete") last — see the note in
+    # _save_spatial for why: it makes a crash mid-save leave a group a
+    # reader can recognize as incomplete instead of one that has "layout"
+    # set but is silently missing "argmax"/"bg_prob"/etc.
     img_grp.array("argmax",
         np.argmax(prob_map, axis=-1).astype(np.uint8),
         dtype="u1", overwrite=True, chunks=chunk, compressor=compressor)
@@ -174,3 +177,16 @@ def _save_flat(
 
     img_grp.array("top_k_probs",
         top_k_prob, dtype="float16", overwrite=True, chunks=chunkk, compressor=compressor)
+
+    img_grp.attrs.update({
+        "true_idx":       true_idx.tolist() if isinstance(true_idx, np.ndarray) else int(true_idx),
+        "N": N, "seed": seed, "trial_id": trial_id,
+        "background_idx": background_idx,
+        "n_classes":      n_classes,
+        "top_k_saved":    top_k,
+        "n_pixels":       n_pixels,
+        "layout":         "flat",
+        "aug":            aug_summary or {},
+        **(hparams or {}),
+        "complete":       True,
+    })
