@@ -10,7 +10,7 @@ import numpy as np
 import zarr
 from omegaconf import DictConfig
 
-from src.inference.inference_engine import InferenceSession
+from src.inference.inference_engine import InferenceSession, resolve_image_group
 from src.inference.export_inference import open_pred_store, save_inference_outputs_zarr
 from src.tracking.base import Tracker
 
@@ -78,21 +78,24 @@ def run_inference_pipeline(
                 prob_map = inference_session.infer(inference_zarr_path, img_name)
 
                 # ── ground truth ──────────────────────────────────────────
-                # is_flat_layout doesn't guarantee per-pixel "y" labels exist
-                # — PCUK/bacteria tissue cores carry them, but milk (also
-                # flat-layout, also intrinsic_validation) is single-label-
-                # per-sample data with no "y" array. Check for it rather
-                # than assuming, so datasets without it fall back to the
-                # same single-label path non-flat intrinsic datasets use.
-                has_pixel_gt = is_flat_layout and "y" in root_gt["images"][img_name]
-                if has_pixel_gt:
-                    # per-pixel labels from store
-                    y_true = root_gt["images"][img_name]["y"][:]  # (N,) int8
+                # Neither is_flat_layout nor intrinsic_validation reliably
+                # predicts whether a store carries per-pixel "y" labels, or
+                # even where a given image's group lives in the store (see
+                # resolve_image_group) — different domains have shown up
+                # with every combination. So just look at what's actually
+                # there: PCUK/bacteria tissue cores have "y"; milk is
+                # single-label-per-sample and doesn't, so it falls back to
+                # the label_encoding lookup like other intrinsic datasets.
+                if is_flat_layout:
+                    gt_grp       = resolve_image_group(root_gt, img_name)
+                    has_pixel_gt = "y" in gt_grp
+                    y_true       = gt_grp["y"][:] if has_pixel_gt else label_encoding.get(img_label)
                 else:
-                    if not is_flat_layout and not cfg.data.intrinsic_validation:
-                        y_true = root_test[img_name]["y"][:]
-                    else:
+                    has_pixel_gt = False
+                    if cfg.data.intrinsic_validation:
                         y_true = label_encoding.get(img_label)    # single int
+                    else:
+                        y_true = root_test[img_name]["y"][:]
 
                 save_inference_outputs_zarr(
                     prob_map       = prob_map,

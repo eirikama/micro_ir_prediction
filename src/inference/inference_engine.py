@@ -9,6 +9,32 @@ from omegaconf import DictConfig
 from src.models.aacnn import AACNN
 
 
+def resolve_image_group(store: zarr.Group, image_name: str) -> zarr.Group:
+    """Find the group holding `image_name`'s data/labels, handling both
+    store layouts in use across domains:
+      - nested under "images/{name}" — train-style zarr built for
+        `create_patient_split` (PCUK, milk, bacteria reference, ...)
+      - "{name}" directly at the top level — legacy test-store layout
+        built by `get_test_split` (microplastics/mlrod/pollen test stores,
+        bacteria's test store, ...)
+
+    Which layout a given store uses is a property of *how that store was
+    built*, not of any single config flag (`hyperspectra`, whether it's a
+    train vs. test path, etc.) — domains have shown up with every
+    combination, e.g. bacteria's train zarr is nested but its test zarr is
+    flat despite both being `hyperspectra: False`. So this always inspects
+    the store itself rather than inferring the layout from config.
+    """
+    if "images" in store and image_name in store["images"]:
+        return store[f"images/{image_name}"]
+    elif image_name in store:
+        return store[image_name]
+    raise KeyError(
+        f"'{image_name}' not found in store.\n"
+        f"  Top-level keys: {list(store.keys())}"
+    )
+
+
 def _open_z_arr(zarr_path: str, image_name: str):
     """Return a *lazy* handle to an image's spectra plus its shape.
 
@@ -18,38 +44,24 @@ def _open_z_arr(zarr_path: str, image_name: str):
     worker) doesn't multiply memory use.
     """
     store = zarr.open(zarr_path, mode="r")
+    grp   = resolve_image_group(store, image_name)
 
-    if "images" in store and image_name in store["images"]:
-        grp = store[f"images/{image_name}"]
+    if "data" in grp:
+        # microplastics layout: spatial cube (H, W, n_wn)
+        z_arr = grp["data"]
+        H, W, Bands = z_arr.shape
+        return z_arr, H, W, Bands
 
-        if "data" in grp:
-            # microplastics layout: spatial cube (H, W, n_wn)
-            z_arr = grp["data"]
-            H, W, Bands = z_arr.shape
-            return z_arr, H, W, Bands
-
-        elif "X" in grp:
-            # PCUK layout: flat annotated spectra (N, n_wn)
-            z_arr = grp["X"]
-            N, Bands = z_arr.shape
-            return z_arr, N, 1, Bands
-
-        else:
-            raise KeyError(
-                f"'{image_name}' found in store but has neither 'data' nor 'X'.\n"
-                f"  Keys: {list(grp.keys())}"
-            )
-
-    elif image_name in store:
-        # legacy test-store layout: <name>/X at root level
-        z_arr = store[f"{image_name}/X"]
+    elif "X" in grp:
+        # PCUK layout: flat annotated spectra (N, n_wn)
+        z_arr = grp["X"]
         N, Bands = z_arr.shape
         return z_arr, N, 1, Bands
 
     else:
         raise KeyError(
-            f"'{image_name}' not found in '{zarr_path}'.\n"
-            f"  Top-level keys: {list(store.keys())}"
+            f"'{image_name}' found in store but has neither 'data' nor 'X'.\n"
+            f"  Keys: {list(grp.keys())}"
         )
 
 
