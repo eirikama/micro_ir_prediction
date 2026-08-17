@@ -29,6 +29,10 @@ augmentations:
     ratio: 0.5
     n_components: 5
     poly_degree: 3
+    als_lam: 1.0e5
+    als_p: 0.01
+    fit_pool_size: 2000
+    fit_pool_seed: 12345
     amplitude_min: 0.0
     amplitude_max: 0.015
 
@@ -36,3 +40,4 @@ augmentations:
     enabled: True
     ratio: 0.7
     scale: 0.003
+    read_noise: 0.005

@@ -224,6 +224,7 @@ def augment_cosmic_rays(
 def augment_shot_noise(
     X: Tensor,           # FIX: was annotated np.ndarray but used torch ops
     scale: float = 0.05,
+    read_noise: float = 0.0,
 ) -> Tensor:
     """
     Poisson (shot) noise augmentation.
@@ -232,6 +233,8 @@ def augment_shot_noise(
     -------
     Each CCD channel counts photons; variance = mean count (Poisson).
     Approximated as signal-proportional Gaussian noise for counts > ~20.
+    Real detectors additionally have a signal-*independent* dark/read-noise
+    floor, which dominates wherever the signal is near zero.
 
     Fix
     ---
@@ -239,18 +242,49 @@ def augment_shot_noise(
     The original had an np.ndarray annotation but called torch.abs /
     torch.randn_like, causing silent conversion issues.
 
+    Fix
+    ---
+    The noise level is now drawn PER SPECTRUM. It was previously a single
+    scalar per call, so every spectrum in a batch received an identical
+    noise level, sharply reducing augmentation diversity (the IR `noise`
+    augmentation already drew per-spectrum levels — this makes the two
+    consistent).
+
+    Fix
+    ---
+    Added an optional read-noise floor. With the signal-proportional term
+    alone, zero-signal regions come out perfectly smooth, which is both
+    unphysical and an easy shortcut feature ("smooth => background").
+
     Parameters
     ----------
-    X     : (p,) or (n, p) *torch.Tensor* of spectra
-    scale : noise amplitude as a fraction of local signal magnitude
+    X          : (p,) or (n, p) *torch.Tensor* of spectra
+    scale      : noise amplitude as a fraction of local signal magnitude
+    read_noise : signal-independent noise floor, as a fraction of each
+                 spectrum's *signal scale* (95th percentile of |X|).
+                 Expressed relatively so it is invariant to each dataset's
+                 absorbance scale, and taken at a high quantile rather than
+                 the median because a typical spectrum is mostly baseline —
+                 its median is ~0, which would scale the floor to nothing.
+                 The 95th percentile rather than the max keeps the reference
+                 robust to cosmic-ray spikes, which this same pipeline may
+                 have already injected.
+                 0.0 (default) reproduces the previous behaviour exactly.
     """
     is_1d = X.ndim == 1
     if is_1d:
         X = X.unsqueeze(0)
 
-    noise_level = torch.rand(1, device=X.device).item() * scale
+    noise_level = torch.rand(X.shape[0], 1, device=X.device) * scale
     noise_std   = noise_level * torch.abs(X)          # heteroscedastic std
-    noise       = torch.randn_like(X) * noise_std
+
+    if read_noise > 0:
+        signal_scale = torch.quantile(
+            torch.abs(X), 0.95, dim=1, keepdim=True
+        )
+        noise_std = noise_std + read_noise * signal_scale
+
+    noise = torch.randn_like(X) * noise_std
 
     X_aug = X + noise
 
@@ -344,6 +378,75 @@ def _apply_paraffin(s: np.ndarray, mask: np.ndarray, wn: np.ndarray, cfg) -> np.
     return s
 
 
+def _als_baseline(
+    Y: np.ndarray,
+    lam: float = 1e5,
+    p: float = 0.01,
+    n_iter: int = 10,
+) -> np.ndarray:
+    """
+    Asymmetric least squares baseline (Eilers & Boelens 2005).
+
+    Fits a smooth curve *under* each spectrum by iteratively reweighting:
+    points above the current estimate (i.e. peaks) get weight `p`, points
+    below get `1 - p`, so peaks are pushed out of the fit rather than
+    averaged into it.
+
+    This replaces the boxcar low-pass that used to stand in for a baseline.
+    A 5%-width boxcar does not remove Raman peaks — it smears them — so any
+    peak whose height varied between spectra leaked into the PCA basis built
+    on top of it (measured: components 2+ were ~7x enriched in peak regions,
+    i.e. they were peak shapes, and adding them back as "background"
+    corrupted the class signal).
+
+    Parameters
+    ----------
+    Y      : (n, L) spectra
+    lam    : smoothness. Larger = stiffer baseline. 1e4-1e6 is the usual
+             range for Raman; too small lets the baseline chase peaks.
+    p      : asymmetry, i.e. weight given to points above the baseline.
+             0.001-0.05 typical.
+    n_iter : reweighting iterations; converges quickly, 10 is ample.
+
+    Returns
+    -------
+    (n, L) array of baselines.
+    """
+    from scipy.linalg import solveh_banded
+
+    Y = np.asarray(Y, dtype=np.float64)
+    squeeze = Y.ndim == 1
+    if squeeze:
+        Y = Y[None, :]
+    n, L = Y.shape
+    if L < 4:
+        return np.zeros_like(Y)[0] if squeeze else np.zeros_like(Y)
+
+    # D'D for the second-difference operator is pentadiagonal with a known
+    # closed form, so it is built directly and solved with a banded Cholesky
+    # in O(L) rather than a general sparse solve — this runs once per fitted
+    # spectrum, so the constant factor matters.
+    main = np.full(L, 6.0); main[0] = main[-1] = 1.0; main[1] = main[-2] = 5.0
+    off1 = np.full(L - 1, -4.0); off1[0] = off1[-1] = -2.0
+    off2 = np.ones(L - 2)
+
+    ab  = np.zeros((3, L))
+    out = np.empty_like(Y)
+    for i in range(n):
+        y = Y[i]
+        w = np.ones(L)
+        z = y.copy()
+        for _ in range(n_iter):
+            ab[2]     = w + lam * main
+            ab[1, 1:] = lam * off1
+            ab[0, 2:] = lam * off2
+            z = solveh_banded(ab, w * y, lower=False, check_finite=False)
+            w = np.where(y > z, p, 1.0 - p)
+        out[i] = z
+
+    return out[0] if squeeze else out
+
+
 class FluorescenceBackgroundAugmentor:
     """
     Simulates fluorescence baselines using a PCA basis fitted to *real*
@@ -354,6 +457,21 @@ class FluorescenceBackgroundAugmentor:
     The original drew random polynomial coefficients, producing baselines
     that do not match the true fluorescence distribution of the dataset.
     At large N this mis-calibration hurts more than it helps.
+
+    Fix
+    ---
+    The basis is now fitted to an ALS baseline (see `_als_baseline`) instead
+    of a boxcar smooth. The boxcar did not separate background from peaks,
+    so components 2+ came out as Raman peak shapes and the augmentation
+    injected scaled copies of the analytical signal.
+
+    Fix
+    ---
+    Component singular values are retained and used to weight the sampled
+    coefficients. Previously `torch.randn(n_components)` gave every
+    component equal weight regardless of how much variance it actually
+    explained, so minor (and most-contaminated) components contributed as
+    strongly as the dominant background mode.
 
     Usage
     -----
@@ -370,11 +488,21 @@ class FluorescenceBackgroundAugmentor:
         wavenumbers: Tensor,
         n_components: int = 5,
         poly_degree: int = 3,
+        als_lam: float = 1e5,
+        als_p: float = 0.01,
+        als_iter: int = 10,
+        max_fit_spectra: int = 2000,
     ) -> None:
         self.wavenumbers   = wavenumbers
         self.n_components  = n_components
         self.poly_degree   = poly_degree
+        self.als_lam       = als_lam
+        self.als_p         = als_p
+        self.als_iter      = als_iter
+        self.max_fit_spectra = max_fit_spectra
         self._pca_basis: Tensor | None = None   # (n_components, p)
+        self._pca_scale: Tensor | None = None   # (n_components,)
+        self._mean_baseline: Tensor | None = None
         self._fallback_basis: Tensor            # polynomial, used before fit()
 
         w_norm = (wavenumbers - wavenumbers.mean()) / wavenumbers.std()
@@ -385,67 +513,93 @@ class FluorescenceBackgroundAugmentor:
     # ------------------------------------------------------------------
     def fit(self, X_train: Tensor) -> "FluorescenceBackgroundAugmentor":
         """
-        Estimate a PCA basis from the *low-frequency* content of X_train.
+        Estimate a PCA basis from the *background* content of X_train.
 
-        We approximate baseline by smoothing each spectrum with a wide
-        median filter (or just keep the very low wavenumber trend),
-        then run PCA.  No sklearn dependency: uses torch.linalg.svd.
+        Baselines are extracted with asymmetric least squares, which fits
+        under the peaks, so the resulting basis describes fluorescence
+        background rather than analytical signal. No sklearn dependency:
+        uses torch.linalg.svd.
         """
-        # Rough baseline estimate: per-spectrum minimum + smoothed trend
-        # Use a simple boxcar average as a cheap low-pass filter
-        X_np = X_train.detach().cpu().float()
-        window = max(1, X_np.shape[1] // 20)          # 5 % of spectrum width
-        kernel  = torch.ones(1, 1, window) / window
-        smooth  = torch.nn.functional.conv1d(
-            X_np.unsqueeze(1),
-            kernel,
-            padding=window // 2,
-        ).squeeze(1)
-        # Trim to original length (conv1d padding can add 1 extra)
-        smooth = smooth[:, : X_np.shape[1]]
+        X_np = X_train.detach().cpu().float().numpy()
 
-        # Centre
-        mean_baseline = smooth.mean(dim=0, keepdim=True)
-        centred        = smooth - mean_baseline
+        # A handful of principal components needs far fewer spectra than the
+        # full training set, and ALS is the expensive step (~2.5 ms/spectrum),
+        # so cap the number fitted. Deterministic seed keeps the basis
+        # reproducible across runs with the same data.
+        if X_np.shape[0] > self.max_fit_spectra:
+            idx = np.random.default_rng(0).choice(
+                X_np.shape[0], self.max_fit_spectra, replace=False
+            )
+            X_np = X_np[idx]
 
-        # SVD → keep top n_components
-        _, _, Vt = torch.linalg.svd(centred, full_matrices=False)
-        self._pca_basis = Vt[: self.n_components].to(X_train.device)  # (k, p)
+        baselines = _als_baseline(
+            X_np, lam=self.als_lam, p=self.als_p, n_iter=self.als_iter
+        )
+        baselines = torch.from_numpy(baselines).float()
+
+        mean_baseline = baselines.mean(dim=0, keepdim=True)
+        centred       = baselines - mean_baseline
+
+        # SVD → keep top n_components, *and* their scales
+        _, S, Vt = torch.linalg.svd(centred, full_matrices=False)
+        k = min(self.n_components, Vt.shape[0])
+        self._pca_basis = Vt[:k].to(X_train.device)                   # (k, p)
+        # Per-component standard deviation, so sampling reproduces the real
+        # spread across components instead of weighting them all equally.
+        self._pca_scale = (
+            S[:k] / max(centred.shape[0] - 1, 1) ** 0.5
+        ).to(X_train.device)
         self._mean_baseline = mean_baseline.to(X_train.device)
         return self
 
     # ------------------------------------------------------------------
     def __call__(self, X, amplitude_range=(0.0, 0.25)):
+        """
+        Add a synthetic fluorescence background to each spectrum.
+
+        Vectorised over the batch — this used to be a per-spectrum Python
+        loop running on every training batch.
+        """
         is_1d = X.ndim == 1
         if is_1d:
             X = X.unsqueeze(0)
 
         n, p = X.shape
-        X_aug = X.clone()
-        robust_intensity = torch.median(torch.abs(X), dim=1).values
+        robust_intensity = torch.median(torch.abs(X), dim=1).values  # (n,)
 
-        for i in range(n):
-            amp = (
-                torch.FloatTensor(1).uniform_(*amplitude_range).item()
-                * robust_intensity[i].item()
-            )
+        if self._pca_basis is not None:
+            k = self._pca_basis.shape[0]
+            # Weight by each component's own standard deviation so the mixture
+            # matches the fitted distribution; with plain randn the smallest
+            # component contributed as much as the dominant background mode.
+            coeffs = torch.randn(n, k, device=X.device) * self._pca_scale
+            background = coeffs @ self._pca_basis                     # (n, p)
+            if self._mean_baseline is not None:
+                # Centre on the typical background shape rather than on pure
+                # deviations, which can be negative-going and unphysical.
+                background = background + self._mean_baseline
+        else:
+            coeffs = torch.randn(n, self.poly_degree + 1, device=X.device)
+            coeffs[:, 0] = coeffs[:, 0].abs() + 0.5
+            background = coeffs @ self._fallback_basis.T.to(X.device)  # (n, p)
 
-            if self._pca_basis is not None:
-                coeffs     = torch.randn(self.n_components, device=X.device)
-                background = coeffs @ self._pca_basis          # (p,)
-            else:
-                coeffs     = torch.randn(self.poly_degree + 1)
-                coeffs[0]  = coeffs[0].abs() + 0.5
-                background = (self._fallback_basis @ coeffs).to(X.device)
+        # Normalise each background to [0, 1] so `amplitude_range` keeps its
+        # meaning (a fraction of each spectrum's robust intensity) regardless
+        # of the fitted basis scale.
+        background = background - background.amin(dim=1, keepdim=True)
+        background = background / background.amax(dim=1, keepdim=True).clamp_min(1e-9)
 
-            background = background - background.min()
-            if background.max() > 0:
-                background = background / background.max()     # [0,1] — keep this
-            # ← second `background = coeffs @ self._pca_basis` deleted
+        amp = (
+            torch.empty(n, 1, device=X.device).uniform_(*amplitude_range)
+            * robust_intensity[:, None]
+        )
+        X_aug = X + amp * background
 
-            if torch.isnan(background).any():
-                continue                                       # skip this spectrum only
-            X_aug[i] = X_aug[i] + amp * background
+        # Fall back to the original spectrum only where augmentation failed,
+        # rather than dropping the whole batch.
+        bad = ~torch.isfinite(X_aug).all(dim=1)
+        if bad.any():
+            X_aug[bad] = X[bad]
 
         if is_1d:
             X_aug = X_aug.squeeze(0)
@@ -1019,7 +1173,11 @@ def _apply_cosmic_rays(s: np.ndarray, mask: np.ndarray, wn: np.ndarray, cfg) -> 
 
 def _apply_shot_noise(s: np.ndarray, mask: np.ndarray, wn: np.ndarray, cfg) -> np.ndarray:
     x = torch.from_numpy(s[mask]).float()
-    x_aug = augment_shot_noise(x, scale=cfg.get("scale", 0.05))
+    x_aug = augment_shot_noise(
+        x,
+        scale=float(cfg.get("scale", 0.05)),
+        read_noise=float(cfg.get("read_noise", 0.0)),
+    )
     s[mask] = x_aug.numpy()
     return s
 
@@ -1049,25 +1207,40 @@ def _apply_wavenumber_shift(s: np.ndarray, mask: np.ndarray, wn: np.ndarray, cfg
                         for the whole masked batch, simulating a
                         session-level calibration offset rather than
                         per-spectrum noise.
+
+    Axis order
+    ----------
+    Works on either an ascending or a descending `wn`. Both interpolation
+    paths (np.interp, and np.searchsorted inside _interp_batch) require an
+    ASCENDING x-axis, and neither raises on a descending one — they just
+    return garbage. FTIR stores are commonly written 4000->400 cm-1, and on
+    such an axis this augmentation used to annihilate the spectrum outright
+    (a unit-height Gaussian peak came back with max 0.0). So the work is
+    done on an ascending view and mapped back.
     """
     shift_max = float(cfg.get("shift_max", 3.0))
     per_batch = bool(cfg.get("per_batch", False))
 
+    ascending = wn[0] < wn[-1]
+    order     = slice(None) if ascending else slice(None, None, -1)
+    wn_a      = np.ascontiguousarray(wn[order])
+
+    s_masked = s[mask][:, order]
+
     if per_batch:
         # one shift for entire batch — simulates session-level drift
         shift = np.random.uniform(-shift_max, shift_max)
-        shifted_wn = wn + shift
         # vectorised interpolation for whole batch at once
         # np.interp is 1D only so we use a loop-free approach via searchsorted
-        s[mask] = _interp_batch(s[mask], wn, shifted_wn)
+        s_masked = _interp_batch(s_masked, wn_a, wn_a + shift)
     else:
         # independent shift per spectrum
-        shifts = np.random.uniform(-shift_max, shift_max, mask.sum())
-        s_masked = s[mask]
+        shifts = np.random.uniform(-shift_max, shift_max, s_masked.shape[0])
         for j in range(len(shifts)):
-            shifted_wn = wn + shifts[j]
-            s_masked[j] = np.interp(wn, shifted_wn, s_masked[j])
-        s[mask] = s_masked
+            s_masked[j] = np.interp(wn_a, wn_a + shifts[j], s_masked[j])
+
+    # reversing twice is an involution, so the same slice maps back
+    s[mask] = s_masked[:, order]
 
     return s
 
@@ -1115,6 +1288,15 @@ class _FluorescenceAugWrapper:
             wn_t,
             n_components=int(cfg.get("n_components", 5)),
             poly_degree=int(cfg.get("poly_degree", 3)),
+            als_lam=float(cfg.get("als_lam", 1e5)),
+            als_p=float(cfg.get("als_p", 0.01)),
+            als_iter=int(cfg.get("als_iter", 10)),
+            # When the caller has already drawn a fixed pool of K spectra
+            # (fit_pool_size), K governs — otherwise the internal performance
+            # cap would silently truncate the pool it was asked to use.
+            max_fit_spectra=int(
+                cfg.get("fit_pool_size") or cfg.get("max_fit_spectra", 2000)
+            ),
         )
         aug.fit(torch.from_numpy(X_train).float())
         self._cache[key] = aug

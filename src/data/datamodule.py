@@ -118,32 +118,48 @@ class SpectralDataModule(pl.LightningDataModule):
         self.val_ds = None
         self.steps_per_epoch = 0
 
-    def setup(self, stage: str | None = None) -> None:
-        if self.train_ds is not None:
-            return
+    def _sample_training_data(
+        self,
+        spectra_per_class: int,
+        bkg_per_class: int,
+        seed: int = 42,
+    ):
+        """Draw spectra from this run's training split.
 
+        Factored out of setup() so the fluorescence fit pool can be drawn
+        through exactly the same path (and from the same split) as the
+        training data itself, just with a different budget and seed.
+        """
         if self.cfg.hyperspectra:
-
-            bkg_per_class = self.cfg.spectra_per_class // self.cfg.sample_to_bkg_spectra_ratio
-            label, spectra, wn, label_encoding = get_training_data_hyperspectral(
+            return get_training_data_hyperspectral(
                 split=self.split,
                 zarr_path=self.cfg.zarr_path,
-                spectra_per_class=self.cfg.spectra_per_class * 2,
-                bkg_per_class=bkg_per_class * 2,
+                spectra_per_class=spectra_per_class,
+                bkg_per_class=bkg_per_class,
                 patch_size=self.cfg.sampling_patch_size,
                 background_max=self.cfg.background_max,
                 sample_min=self.cfg.sample_min,
                 max_class_attempts=self.cfg.max_sampling_per_class_attempts,
-                include_bkg_pixels=self.cfg.include_bkg_pixels
+                include_bkg_pixels=self.cfg.include_bkg_pixels,
+                seed=seed,
             )
-        else:
+        return get_training_data_spectra(
+            split=self.split,
+            zarr_path=self.cfg.zarr_path,
+            spectra_per_class=spectra_per_class,
+            classes=list(self.cfg.classes) if self.cfg.get("classes") else None,
+            seed=seed,
+        )
 
-            label, spectra, wn, label_encoding = get_training_data_spectra(
-                split=self.split,
-                zarr_path=self.cfg.zarr_path,
-                spectra_per_class=self.cfg.spectra_per_class * 2,
-                classes=list(self.cfg.classes) if self.cfg.get("classes") else None,
-            )
+    def setup(self, stage: str | None = None) -> None:
+        if self.train_ds is not None:
+            return
+
+        bkg_per_class = self.cfg.spectra_per_class // self.cfg.sample_to_bkg_spectra_ratio
+        label, spectra, wn, label_encoding = self._sample_training_data(
+            spectra_per_class=self.cfg.spectra_per_class * 2,
+            bkg_per_class=bkg_per_class * 2,
+        )
         self.wn = wn
         self.spectra = spectra
         self.label_encoding = label_encoding
@@ -164,10 +180,88 @@ class SpectralDataModule(pl.LightningDataModule):
             for aug_name, aug_cfg_item in aug_map.items():
                 aug_type = aug_cfg_item.get("type", aug_name)
                 if aug_type == "fluorescence" and aug_cfg_item.get("enabled", True):
-                    log.info("[fluorescence] fitting on %d spectra", self.spectra.shape[0])
-                    _apply_fluorescence.fit(self.wn, self.spectra, aug_cfg_item)
-                    log.info("[fluorescence] fit complete")
+                    self._fit_fluorescence_basis(aug_cfg_item, s_train, len(label_encoding))
                     break
+
+    def _fit_fluorescence_basis(self, aug_cfg, s_train: np.ndarray, n_classes: int) -> None:
+        """Fit the fluorescence PCA basis, optionally on a fixed reference pool.
+
+        Two things this controls, both of which otherwise bias a
+        scaling-law experiment (accuracy vs spectra_per_class):
+
+        1. The basis is fitted on the TRAIN split only. It used to be fitted
+           on `self.spectra`, i.e. before the train/val split — with
+           val_split_size 0.5 that put half the validation set into the fit.
+           Only background shape leaks (not labels), but val_acc drives early
+           stopping and checkpoint selection, so it biased model selection.
+
+        2. `fit_pool_size` (K) draws a dedicated, N-independent pool of K
+           spectra for the fit instead of using whatever this run happens to
+           have sampled. Without it the basis is fitted on
+           spectra_per_class * 2 * n_classes spectra, so the augmentation is
+           a *different transformation* at every point of the scaling curve —
+           the augmentation being measured changes along the x-axis. Drawing
+           K from the same training split at every N decouples the two.
+
+           Set fit_pool_size to null/0 to switch this off and fit on the
+           run's own training spectra (the N-coupled behaviour), which is
+           what you want as the "B" arm of an A/B on this effect.
+
+        Config keys
+        -----------
+        fit_pool_size : int | null — K, spectra drawn for the fit. null/0 =>
+                        use this run's training spectra.
+        fit_pool_seed : int | null — seed for the pool draw. Fixed by default
+                        so the pool (and hence the basis) is identical across
+                        runs and across N. null => follow cfg.seed, which
+                        makes the pool vary per seed like the rest of the data.
+        """
+        pool_size = aug_cfg.get("fit_pool_size", None)
+        pool_size = int(pool_size) if pool_size else 0
+
+        if pool_size <= 0:
+            log.info(
+                "[fluorescence] fit_pool_size unset — fitting on this run's "
+                "%d training spectra (basis is coupled to spectra_per_class)",
+                s_train.shape[0],
+            )
+            _apply_fluorescence.fit(self.wn, s_train, aug_cfg)
+            log.info("[fluorescence] fit complete")
+            return
+
+        pool_seed = aug_cfg.get("fit_pool_seed", 12345)
+        pool_seed = int(self.cfg.get("seed", 42)) if pool_seed is None else int(pool_seed)
+
+        # Budget per class, rounded up so the pool reaches K even when K does
+        # not divide evenly. The draw is capped by what the split actually
+        # holds, so a small split still yields a smaller pool — K fixes the
+        # *request*, not the available support.
+        per_class = -(-pool_size // max(n_classes, 1))
+        bkg_per_class = per_class // max(self.cfg.sample_to_bkg_spectra_ratio, 1)
+
+        log.info(
+            "[fluorescence] drawing a fixed fit pool: K=%d (%d/class, seed=%d)",
+            pool_size, per_class, pool_seed,
+        )
+        _, pool_spectra, _, _ = self._sample_training_data(
+            spectra_per_class=per_class,
+            bkg_per_class=bkg_per_class,
+            seed=pool_seed,
+        )
+
+        if pool_spectra.shape[0] > pool_size:
+            idx = np.random.default_rng(pool_seed).choice(
+                pool_spectra.shape[0], pool_size, replace=False
+            )
+            pool_spectra = pool_spectra[idx]
+
+        log.info(
+            "[fluorescence] fitting on fixed pool of %d spectra "
+            "(independent of spectra_per_class=%d)",
+            pool_spectra.shape[0], self.cfg.spectra_per_class,
+        )
+        _apply_fluorescence.fit(self.wn, pool_spectra, aug_cfg)
+        log.info("[fluorescence] fit complete")
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(self.train_ds, batch_size=None, pin_memory=False)
