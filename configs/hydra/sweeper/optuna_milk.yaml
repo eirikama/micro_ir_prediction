@@ -18,7 +18,7 @@ params:
   data.augmentations.polynomial_baseline_signal.p0_max: interval(0.1, 1.0)
   data.augmentations.polynomial_baseline_signal.p1_min: interval(0.0, 0.5)
   data.augmentations.polynomial_baseline_signal.p1_max: interval(0.5, 4.0)
-  data.augmentations.polynomial_baseline_signal.p2_max: tag(log, interval(1e-4, 1e-2))
+  data.augmentations.polynomial_baseline_signal.p2_max: tag(log, interval(1e-2, 3e-1))
   # ── augmentation: noise ───────────────────────────────────────────────────
   data.augmentations.noise.ratio: interval(0.1, 0.9)
   data.augmentations.noise.max_level: tag(log, interval(5e-4, 2e-2))
