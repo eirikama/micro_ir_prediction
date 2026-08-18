@@ -55,3 +55,12 @@ params:
   data.augmentations.dilution.enabled: choice(true, false)
   data.augmentations.dilution.ratio: interval(0.05, 0.5)
   data.augmentations.dilution.dilution_max: interval(0.02, 0.25)
+
+  # ── preprocessing ─────────────────────────────────────────────────────────
+  data.preprocessing.enabled: choice(true, false)
+  data.preprocessing.steps.0.enabled: choice(true, false)
+  data.preprocessing.steps.1.enabled: choice(true, false)
+  data.preprocessing.steps.1.poly_order: choice(1, 2, 3)
+  data.preprocessing.steps.2.enabled: choice(true, false)
+  data.preprocessing.steps.2.window: choice(7, 11, 15, 21)
+  data.preprocessing.steps.2.deriv: choice(0, 1, 2)

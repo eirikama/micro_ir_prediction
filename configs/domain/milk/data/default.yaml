@@ -18,6 +18,22 @@ z_normalize: False
 augment_train: True
 augment_val: False
 modality: ir
+
+preprocessing:
+  enabled: False
+  steps:
+    - type: crop
+      enabled: False
+      keep: [[1000, 1800], [2800, 3000]]
+    - type: emsc
+      enabled: True
+      poly_order: 2
+    - type: savgol
+      enabled: False
+      window: 11
+      polyorder: 3
+      deriv: 1
+
 augmentations:
   polynomial_baseline_signal:
     type: polynomial_baseline

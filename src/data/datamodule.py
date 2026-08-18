@@ -21,13 +21,22 @@ for _alias, _target in [
         setattr(np, _alias, _target)
 
 from src.data.augmentation import AUG_REGISTRY, _apply_fluorescence
+from src.data.preprocessing import apply_preprocessing, fit_preprocessing, resolve_steps
 from src.data.sampling import create_experiment_split, get_training_data_spectra, get_training_data_hyperspectral
 
 log = logging.getLogger(__name__)
 
 
 class SpectralDataset(IterableDataset):
-    def __init__(self, spectra: np.ndarray, y: np.ndarray, wn: np.ndarray, cfg: DictConfig, augment: bool) -> None:
+    def __init__(
+        self,
+        spectra: np.ndarray,
+        y: np.ndarray,
+        wn: np.ndarray,
+        cfg: DictConfig,
+        augment: bool,
+        preproc_state: dict | None = None,
+    ) -> None:
 
         self.spectra = spectra.cpu().numpy() if torch.is_tensor(spectra) else spectra
         self.y = y.cpu().numpy() if torch.is_tensor(y) else y
@@ -35,6 +44,11 @@ class SpectralDataset(IterableDataset):
 
         self.cfg = cfg
         self.augment = augment
+        # Fitted state for stateful preprocessing steps (e.g. the EMSC
+        # reference). Fitted on the training split in SpectralDataModule.setup
+        # and shared with the val dataset, so val is corrected against the
+        # training reference rather than its own.
+        self.preproc_state = preproc_state or {}
 
         # 1. Group indices by class
         self.unique_classes = np.unique(self.y)
@@ -98,6 +112,14 @@ class SpectralDataset(IterableDataset):
                 mask = base & (np.random.rand(B) < aug_cfg.ratio)
                 if mask.any():
                     s = AUG_REGISTRY[aug_type](s, mask, self.wn, aug_cfg)
+
+        # Preprocessing runs AFTER augmentation and on train, val and
+        # inference alike: augmentation simulates instrument artifacts,
+        # preprocessing removes them. Independent of `augment`, so it can be
+        # used instead of augmentation, alongside it, or not at all.
+        s, _ = apply_preprocessing(
+            s, self.wn, self.cfg.get("preprocessing"), self.preproc_state
+        )
 
         if self.cfg.z_normalize:
             mu = s.mean(axis=1, keepdims=True)
@@ -171,8 +193,25 @@ class SpectralDataModule(pl.LightningDataModule):
         self.steps_per_epoch = len(l_train) // self.cfg.batch_size
         self.val_batches = len(l_val) // self.cfg.batch_size
 
-        self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.cfg, self.cfg.augment_train)
-        self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg, self.cfg.augment_train and self.cfg.augment_val)
+        # Fit stateful preprocessing (e.g. the EMSC reference) on the TRAIN
+        # split only, then share that state with val — otherwise each split
+        # is corrected against its own reference and they are not comparable.
+        # The same state is written beside the checkpoint after training so
+        # inference reproduces it exactly (see save_preproc_state).
+        steps = resolve_steps(self.cfg.get("preprocessing"))
+        self.preproc_state = fit_preprocessing(s_train, self.wn, self.cfg.get("preprocessing"))
+        if steps:
+            log.info(
+                "[preprocessing] enabled: %s", " -> ".join(s["type"] for s in steps)
+            )
+        else:
+            log.info("[preprocessing] disabled")
+
+        self.train_ds = SpectralDataset(s_train, l_train, self.wn, self.cfg,
+                                        self.cfg.augment_train, self.preproc_state)
+        self.val_ds = SpectralDataset(s_val, l_val, self.wn, self.cfg,
+                                      self.cfg.augment_train and self.cfg.augment_val,
+                                      self.preproc_state)
 
         # Fit fluorescence PCA basis when that augmentation is enabled.
         if self.cfg.augment_train or self.cfg.augment_val:

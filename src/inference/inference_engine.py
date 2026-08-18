@@ -91,7 +91,44 @@ def _load_model(ckpt_path: str, device: torch.device):
     return model
 
 
-def _infer_batches(model, device: torch.device, z_arr, H: int, W: int, Bands: int, batch_size: int) -> np.ndarray:
+_WN_CACHE: dict = {}
+
+
+def _store_wavenumbers(zarr_path: str) -> np.ndarray | None:
+    """Wavenumber axis for a store, cached per path.
+
+    Preprocessing steps like `crop` and `emsc` are defined against the
+    wavenumber axis, so inference needs the same axis training used. Cached
+    because this is hit once per batch.
+    """
+    if zarr_path not in _WN_CACHE:
+        try:
+            wn = zarr.open(zarr_path, mode="r").attrs["wavenumbers"]
+            _WN_CACHE[zarr_path] = np.asarray(wn, dtype=np.float64)
+        except Exception:
+            _WN_CACHE[zarr_path] = None
+    return _WN_CACHE[zarr_path]
+
+
+def _preprocess(data: np.ndarray, wn, steps, state) -> np.ndarray:
+    """Apply the configured preprocessing to one batch of raw spectra.
+
+    Must mirror exactly what SpectralDataset._process_batch did at training
+    time. The model's InputNorm (InstanceNorm) makes it invariant to
+    per-spectrum offset and scale, so skipping `z_normalize` here is
+    harmless — but shape-changing steps (derivatives, EMSC, crop) are not
+    absorbed by it, and skipping them would silently feed the model a
+    different domain than it was trained on.
+    """
+    if steps is None:
+        return data
+    from src.data.preprocessing import apply_preprocessing
+    out, _ = apply_preprocessing(data, wn, steps, state)
+    return np.ascontiguousarray(out)
+
+
+def _infer_batches(model, device: torch.device, z_arr, H: int, W: int, Bands: int,
+                   batch_size: int, wn=None, steps=None, state=None) -> np.ndarray:
     """Run the model over one image's pixels in batches, reading each batch
     lazily from `z_arr`. Shared by the single-GPU path and each persistent
     worker's per-task handling."""
@@ -102,6 +139,7 @@ def _infer_batches(model, device: torch.device, z_arr, H: int, W: int, Bands: in
         for start in range(0, num_pixels, batch_size):
             end   = min(start + batch_size, num_pixels)
             data  = _read_pixel_range(z_arr, W, Bands, start, end)
+            data  = _preprocess(data, wn, steps, state)
             chunk = (
                 torch.from_numpy(data.astype(np.float32))
                 .unsqueeze(1)
@@ -122,6 +160,8 @@ def _persistent_gpu_worker(
     ckpt_path: str,
     task_queue: mp.Queue,
     output_queue: mp.Queue,
+    steps=None,
+    state=None,
 ) -> None:
     """Long-lived worker: loads the checkpoint once, then serves batches for
     however many images are sent its way until it receives the sentinel.
@@ -144,7 +184,7 @@ def _persistent_gpu_worker(
         model  = _load_model(ckpt_path, device)
 
         cached_key = None
-        cached_arr = cached_W = cached_Bands = None
+        cached_arr = cached_W = cached_Bands = cached_wn = None
 
         with torch.inference_mode():
             while True:
@@ -156,9 +196,11 @@ def _persistent_gpu_worker(
                 key = (zarr_path, image_name)
                 if key != cached_key:
                     cached_arr, _, cached_W, cached_Bands = _open_z_arr(zarr_path, image_name)
+                    cached_wn = _store_wavenumbers(zarr_path)
                     cached_key = key
 
                 data = _read_pixel_range(cached_arr, cached_W, cached_Bands, start, end)
+                data = _preprocess(data, cached_wn, steps, state)
                 chunk = (
                     torch.from_numpy(data.astype(np.float32))
                     .unsqueeze(1)
@@ -189,13 +231,26 @@ class InferenceSession:
                 prob_map = sess.infer(zarr_path, img["name"])
     """
 
-    def __init__(self, ckpt_path: str, devices: list[int] | None = None, batch_size: int = 512):
+    def __init__(self, ckpt_path: str, devices: list[int] | None = None, batch_size: int = 512,
+                 preprocessing=None, preproc_state=None):
+        """
+        preprocessing  : the `data.preprocessing` config block, or None to
+                         skip preprocessing entirely.
+        preproc_state  : fitted state (e.g. the EMSC reference). Defaults to
+                         the sidecar written next to `ckpt_path` at training
+                         time, so a checkpoint path alone is enough to
+                         reproduce the training-time transform.
+        """
+        from src.data.preprocessing import load_state_for_ckpt, resolve_steps
+
         self.ckpt_path  = ckpt_path
         self.devices    = list(devices) if devices else [0]
         self.batch_size = batch_size
         self.multi_gpu  = len(self.devices) > 1
         self._closed    = False
         self._epoch     = 0
+        self.steps = resolve_steps(preprocessing) if preprocessing is not None else []
+        self.state = preproc_state if preproc_state is not None else load_state_for_ckpt(ckpt_path)
 
         if self.multi_gpu:
             self.task_queue   = mp.Queue()
@@ -203,7 +258,8 @@ class InferenceSession:
             self.workers = [
                 mp.Process(
                     target=_persistent_gpu_worker,
-                    args=(gpu_id, ckpt_path, self.task_queue, self.output_queue),
+                    args=(gpu_id, ckpt_path, self.task_queue, self.output_queue,
+                          self.steps, self.state),
                 )
                 for gpu_id in self.devices
             ]
@@ -217,7 +273,10 @@ class InferenceSession:
     def infer(self, zarr_path: str, image_name: str) -> np.ndarray:
         z_arr, H, W, Bands = _open_z_arr(zarr_path, image_name)
         if not self.multi_gpu:
-            return _infer_batches(self.model, self.device, z_arr, H, W, Bands, self.batch_size)
+            return _infer_batches(
+                self.model, self.device, z_arr, H, W, Bands, self.batch_size,
+                wn=_store_wavenumbers(zarr_path), steps=self.steps, state=self.state,
+            )
         return self._infer_multi(zarr_path, image_name, H, W, Bands)
 
     def _infer_multi(self, zarr_path: str, image_name: str, H: int, W: int, Bands: int) -> np.ndarray:

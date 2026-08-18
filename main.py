@@ -13,6 +13,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 from src.config_schema import DataConfig, ModelConfig, TrainerConfig, InferenceConfig
 from src.data.datamodule import SpectralDataModule
+from src.data.preprocessing import save_state_for_ckpt
 from src.data.sampling import create_experiment_split, get_test_split, create_patient_split
 from src.pipeline.train_pipeline import run_training_pipeline
 from src.pipeline.infer_pipeline import run_inference_pipeline
@@ -155,6 +156,16 @@ def main(cfg: DictConfig) -> float | None:
             best_path, best_val_acc = run_training_pipeline(cfg, datamodule, tracker)
             with open_dict(cfg):
                 cfg.inference.ckpt_path = best_path
+
+            # Persist fitted preprocessing state (e.g. the EMSC reference)
+            # beside the checkpoint, so inference — in this run or a later
+            # standalone one — reproduces the training-time transform from
+            # the checkpoint path alone. No-op for stateless pipelines.
+            sidecar = save_state_for_ckpt(
+                getattr(datamodule, "preproc_state", {}), best_path
+            )
+            if sidecar:
+                log.info("Saved preprocessing state: %s", sidecar)
 
         # ── infer ─────────────────────────────────────────────────────────────
         if cfg.mode in ["infer", "all"]:

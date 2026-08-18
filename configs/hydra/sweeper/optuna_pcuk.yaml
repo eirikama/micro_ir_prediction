@@ -35,3 +35,12 @@ params:
   data.augmentations.wavenumber_shift.enabled: choice(true, false)
   data.augmentations.wavenumber_shift.ratio: interval(0.1, 0.9)
   data.augmentations.wavenumber_shift.shift_max: interval(0.1, 50.0)
+
+  # ── preprocessing ─────────────────────────────────────────────────────────
+  data.preprocessing.enabled: choice(true, false)
+  data.preprocessing.steps.0.enabled: choice(true, false)
+  data.preprocessing.steps.1.enabled: choice(true, false)
+  data.preprocessing.steps.1.poly_order: choice(1, 2, 3)
+  data.preprocessing.steps.2.enabled: choice(true, false)
+  data.preprocessing.steps.2.window: choice(7, 11, 15, 21)
+  data.preprocessing.steps.2.deriv: choice(0, 1, 2)

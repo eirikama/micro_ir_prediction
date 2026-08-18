@@ -65,6 +65,9 @@ def run_inference_pipeline(
              ckpt_path=cfg.inference.ckpt_path,
              devices=list(cfg.inference.devices),
              batch_size=cfg.inference.batch_size,
+             # Same preprocessing as training, with the state fitted on the
+             # training split (loaded from the sidecar beside the ckpt).
+             preprocessing=cfg.data.get("preprocessing"),
          ) as inference_session:
         for i, img_data in enumerate(test_images):
             img_name  = img_data["name"]

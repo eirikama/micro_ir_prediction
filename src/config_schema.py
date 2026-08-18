@@ -62,6 +62,10 @@ class DataConfig:
     modality: str = "ir"
     classes: Optional[list[str]] = None
     augmentations: Any = field(default_factory=dict)
+    # Typed Any (like `augmentations`) because the block is a free-form list
+    # of steps, or a dict of {enabled, steps}. DataConfig is a structured
+    # config, so a key absent from here is rejected at Hydra compose time.
+    preprocessing: Any = field(default_factory=dict)
 
 @dataclass
 class MasterConfig:

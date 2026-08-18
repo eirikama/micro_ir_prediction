@@ -34,3 +34,13 @@ params:
   data.augmentations.cosmic_rays.ratio: interval(0.1, 0.9)
   data.augmentations.cosmic_rays.spike_rate: tag(log, interval(5e-5, 5e-3))
   data.augmentations.cosmic_rays.amplitude_max: interval(3.0, 20.0)
+
+  # ── preprocessing ─────────────────────────────────────────────────────────
+  data.preprocessing.enabled: choice(true, false)
+  data.preprocessing.steps.0.enabled: choice(true, false)
+  data.preprocessing.steps.0.lam: tag(log, interval(1e3, 1e7))
+  data.preprocessing.steps.0.p: tag(log, interval(1e-3, 1e-1))
+  data.preprocessing.steps.1.enabled: choice(true, false)
+  data.preprocessing.steps.1.window: choice(7, 11, 15, 21)
+  data.preprocessing.steps.1.deriv: choice(0, 1, 2)
+  data.preprocessing.steps.2.enabled: choice(true, false)

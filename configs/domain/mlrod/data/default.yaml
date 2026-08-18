@@ -19,6 +19,22 @@ augment_val: False
 test_sample_ratio: 1.0
 
 modality: raman
+
+preprocessing:
+  enabled: False
+  steps:
+    - type: als
+      enabled: True
+      lam: 1.0e5
+      p: 0.01
+    - type: savgol
+      enabled: False
+      window: 11
+      polyorder: 3
+      deriv: 1
+    - type: snv
+      enabled: False
+
 augmentations:
   cosmic_rays:
     enabled: True
