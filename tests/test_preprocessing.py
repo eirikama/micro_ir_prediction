@@ -422,3 +422,78 @@ def test_dl_mie_is_registered_and_stateless():
     from src.data.preprocessing import PREPROC_REGISTRY, STATEFUL
     assert "dl_mie" in PREPROC_REGISTRY
     assert "dl_mie" not in STATEFUL      # pretrained; no fit on training data
+
+
+def test_dl_mie_loads_a_plain_state_dict_checkpoint(spectra, wn, tmp_path):
+    """`torch.save(model.state_dict(), 'x.t7')` is a normal PyTorch archive —
+    the extension is irrelevant. It needs the architecture from `model:`."""
+    ckpt = tmp_path / "oak_running_aux.t7"
+    net = _DoubleNet(scale=2.0)
+    torch.save(net.state_dict(), str(ckpt))
+
+    block = _steps({
+        "type": "dl_mie",
+        "model": {"_target_": f"{__name__}.{_DoubleNet.__name__}", "scale": 3.0},
+        "checkpoint": str(ckpt),
+        "device": "cpu",
+    })
+    X, _ = apply_preprocessing(spectra.copy(), wn, block)
+    # scale is a plain attribute, not a buffer, so the ctor value (3.0) stands;
+    # what matters is that load_state_dict accepted the file without error.
+    np.testing.assert_allclose(X, spectra * 3.0, rtol=1e-5)
+
+
+def test_dl_mie_state_dict_without_model_block_explains_itself(spectra, wn, tmp_path):
+    """Regression: jit.load on a state_dict raises 'failed locating file
+    constants.pkl', which says nothing about the real problem."""
+    ckpt = tmp_path / "weights.t7"
+    torch.save(_DoubleNet().state_dict(), str(ckpt))
+
+    with pytest.raises(NotImplementedError, match="state_dict, not a TorchScript"):
+        apply_preprocessing(spectra.copy(), wn, _steps(
+            {"type": "dl_mie", "checkpoint": str(ckpt), "device": "cpu"}))
+
+
+def test_dl_mie_expect_channels_catches_a_missing_interpolate_step(spectra, wn):
+    """Enabling dl_mie without the interpolate step that pins its grid must
+    fail here, naming the fix — not deep inside the network."""
+    block = _steps({
+        "type": "dl_mie",
+        "model": {"_target_": f"{__name__}.{_DoubleNet.__name__}", "scale": 2.0},
+        "device": "cpu",
+        "expect_channels": 737,
+    })
+    with pytest.raises(ValueError, match=r"expects 737 channels but received 400"):
+        apply_preprocessing(spectra.copy(), wn, block)
+
+
+def test_interpolate_then_dl_mie_pins_the_grid(spectra, wn):
+    # target grid must lie inside the source range (the fixture spans
+    # 600-3200); asking for 900-3800 here is what the next test covers.
+    block = _steps(
+        {"type": "interpolate", "start": 900, "stop": 3100, "num": 737},
+        {"type": "dl_mie",
+         "model": {"_target_": f"{__name__}.{_DoubleNet.__name__}", "scale": 2.0},
+         "device": "cpu", "expect_channels": 737},
+    )
+    X, w = apply_preprocessing(spectra.copy(), wn, block)
+    assert X.shape == (spectra.shape[0], 737)
+    np.testing.assert_allclose(w, np.linspace(900, 3100, 737))
+
+
+def test_interpolate_raises_when_source_does_not_cover_target(spectra):
+    """Fails loudly rather than zero-filling channels the instrument never saw."""
+    narrow = np.linspace(1000.0, 3500.0, L)
+    block = _steps({"type": "interpolate", "start": 900, "stop": 3800, "num": 737})
+    with pytest.raises(ValueError, match="below the interpolation range"):
+        apply_preprocessing(spectra.copy(), narrow, block)
+
+
+def test_interpolate_handles_descending_axis(spectra, wn):
+    """FTIR stores are often written 4000->400; the result must match the
+    ascending case (np.interp silently would not)."""
+    block = _steps({"type": "interpolate", "start": 900, "stop": 3200, "num": 300})
+    asc, w_a = apply_preprocessing(spectra.copy(), wn, block)
+    desc, w_d = apply_preprocessing(spectra[:, ::-1].copy(), wn[::-1].copy(), block)
+    np.testing.assert_allclose(w_a, w_d)
+    np.testing.assert_allclose(asc, desc, atol=1e-9)

@@ -22,11 +22,17 @@ modality: ir
 preprocessing:
   enabled: False
   steps:
+    - type: interpolate
+      enabled: False
+      start: 900
+      stop: 3800
+      num: 737
     - type: crop
       enabled: False
       keep: [[1000, 1800], [2800, 3000]]
     - type: dl_mie
       enabled: False
+      expect_channels: 737
       model:
         _target_: src.models.mie_net.MieCorrectionNet
       checkpoint: null

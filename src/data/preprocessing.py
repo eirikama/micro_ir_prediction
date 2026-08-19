@@ -341,7 +341,25 @@ def _load_dl_model(cfg, device):
                 sd = sd.get("state_dict", sd)
             model.load_state_dict(sd)
     elif checkpoint:
-        model = torch.jit.load(checkpoint, map_location="cpu")
+        try:
+            model = torch.jit.load(checkpoint, map_location="cpu")
+        except RuntimeError as exc:
+            # A plain `torch.save(model.state_dict(), ...)` file is not a
+            # TorchScript archive, and jit.load fails on it with an opaque
+            # "failed locating file constants.pkl". Say what is actually wrong.
+            obj = torch.load(checkpoint, map_location="cpu", weights_only=False)
+            if isinstance(obj, dict):
+                raise NotImplementedError(
+                    f"'{checkpoint}' holds a state_dict, not a TorchScript "
+                    "archive, so the network architecture has to come from "
+                    "config too:\n"
+                    "  model:\n"
+                    "    _target_: your.module.YourMieNet\n"
+                    f"  checkpoint: {checkpoint}\n"
+                    "Supply `checkpoint` alone only for a model exported with "
+                    "torch.jit.save()."
+                ) from exc
+            raise
     else:
         raise NotImplementedError(
             "Step 'dl_mie' has no model yet. Supply either\n"
@@ -382,11 +400,26 @@ def _dl_mie(X: np.ndarray, wn: np.ndarray, cfg, state):
     checkpoint : state_dict for the above, or a TorchScript archive on its own
     device     : 'auto' (default) | 'cpu' | 'cuda' | 'cuda:1'
     batch_size : spectra per forward pass (default 4096)
+    expect_channels : int, optional — the input width the network was trained
+                 on. Checked before the forward pass, so forgetting the
+                 `interpolate` step that pins the grid fails here with an
+                 actionable message instead of somewhere inside the network.
 
     Note this is the learned inverse of the `mie_scattering` augmentation —
     enabling both simulates scattering and then removes it.
     """
     import torch
+
+    expect = cfg.get("expect_channels", None)
+    if expect is not None and X.shape[1] != int(expect):
+        raise ValueError(
+            f"dl_mie expects {int(expect)} channels but received {X.shape[1]} "
+            f"(wavenumber range {wn.min():.1f}-{wn.max():.1f} cm-1). Pin the "
+            "grid with an `interpolate` step *before* this one, e.g.\n"
+            "  - type: interpolate\n"
+            f"    start: {wn.min():.0f}\n    stop: {wn.max():.0f}\n    num: {int(expect)}\n"
+            "using the grid the network was trained on."
+        )
 
     device = _resolve_device(cfg.get("device", "auto"))
     model  = _load_dl_model(cfg, device)
