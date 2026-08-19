@@ -1,6 +1,7 @@
 """Tests for config-driven spectral preprocessing.
 
-Pure numpy/scipy — no zarr or Lightning, so these always run.
+No zarr or Lightning, so these always run. torch is needed only by the
+`dl_mie` tests, which stand in a dummy network for the real one.
 """
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 from omegaconf import OmegaConf
 
 from src.data.preprocessing import (
@@ -319,3 +321,104 @@ def test_emsc_family_raises_without_biospectools(spectra, wn, monkeypatch):
                                                 "num": 3, "fringe_wn_location": [2400, 2700]}),
                 {"emsc_reference": spectra.mean(0)},
             )
+
+
+# ── dl_mie: DL Mie-scattering correction ─────────────────────────────────────
+#
+# The network itself is supplied via config and does not exist yet. These
+# tests pin the plumbing around it — the numpy<->torch boundary, batching,
+# the model contract, and the fact that it is loaded once and not per batch.
+
+class _DoubleNet(torch.nn.Module):
+    """Stand-in for the real correction network. Doubles the input and counts
+    forward passes, so tests can assert on batching and caching."""
+
+    n_instances = 0
+    n_forward = 0
+
+    def __init__(self, scale: float = 2.0):
+        super().__init__()
+        self.scale = scale
+        type(self).n_instances += 1
+
+    def forward(self, x):                      # (B, 1, L) -> (B, 1, L)
+        type(self).n_forward += 1
+        return x * self.scale
+
+
+class _FlatOutNet(_DoubleNet):
+    """Returns (B, L) instead of (B, 1, L) — the other allowed output shape."""
+
+    def forward(self, x):
+        return (x * self.scale).squeeze(1)
+
+
+def _dl_step(cls, **kw):
+    return _steps({
+        "type": "dl_mie",
+        "model": {"_target_": f"{__name__}.{cls.__name__}", "scale": 2.0},
+        "device": "cpu",
+        **kw,
+    })
+
+
+@pytest.fixture(autouse=True)
+def _clear_dl_cache():
+    from src.data.preprocessing import _DL_MODEL_CACHE
+    _DL_MODEL_CACHE.clear()
+    _DoubleNet.n_instances = _DoubleNet.n_forward = 0
+    yield
+    _DL_MODEL_CACHE.clear()
+
+
+def test_dl_mie_applies_the_network(spectra, wn):
+    X, w = apply_preprocessing(spectra.copy(), wn, _dl_step(_DoubleNet))
+    assert X.shape == spectra.shape
+    np.testing.assert_allclose(w, wn)
+    np.testing.assert_allclose(X, spectra * 2.0, rtol=1e-5)
+
+
+def test_dl_mie_accepts_flat_model_output(spectra, wn):
+    """Model contract allows (B, L) as well as (B, 1, L)."""
+    X, _ = apply_preprocessing(spectra.copy(), wn, _dl_step(_FlatOutNet))
+    np.testing.assert_allclose(X, spectra * 2.0, rtol=1e-5)
+
+
+def test_dl_mie_batches_large_inputs(spectra, wn):
+    n = spectra.shape[0]
+    apply_preprocessing(spectra.copy(), wn, _dl_step(_DoubleNet, batch_size=8))
+    assert _DoubleNet.n_forward == -(-n // 8)          # ceil(n / 8) passes
+
+
+def test_dl_mie_loads_model_once_across_calls(spectra, wn):
+    """Regression guard: the checkpoint must not be reloaded per batch — that
+    is what made the old inference loop slow."""
+    block = _dl_step(_DoubleNet, batch_size=8)
+    for _ in range(3):
+        apply_preprocessing(spectra.copy(), wn, block)
+    assert _DoubleNet.n_instances == 1
+    assert _DoubleNet.n_forward > 1                    # but it did run repeatedly
+
+
+def test_dl_mie_without_a_model_says_what_to_supply(spectra, wn):
+    with pytest.raises(NotImplementedError, match="_target_"):
+        apply_preprocessing(spectra.copy(), wn, _steps({"type": "dl_mie"}))
+
+
+def test_dl_mie_composes_after_other_steps(spectra, wn):
+    """Runs on whatever the preceding steps produced, including a changed axis."""
+    block = _steps(
+        {"type": "crop", "keep": [[1000, 1800]]},
+        {"type": "dl_mie",
+         "model": {"_target_": f"{__name__}.{_DoubleNet.__name__}", "scale": 2.0},
+         "device": "cpu"},
+    )
+    X, w = apply_preprocessing(spectra.copy(), wn, block)
+    assert X.shape[1] == len(w) < spectra.shape[1]
+    assert np.isfinite(X).all()
+
+
+def test_dl_mie_is_registered_and_stateless():
+    from src.data.preprocessing import PREPROC_REGISTRY, STATEFUL
+    assert "dl_mie" in PREPROC_REGISTRY
+    assert "dl_mie" not in STATEFUL      # pretrained; no fit on training data

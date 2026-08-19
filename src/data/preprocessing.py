@@ -272,6 +272,140 @@ def _interpolate(X: np.ndarray, wn: np.ndarray, cfg, state):
     return np.asarray(out, dtype=np.float64), np.asarray(out_wn, dtype=np.float64)
 
 
+# Loaded DL correction models, keyed by (target, checkpoint, device).
+# Module-level so a model is loaded ONCE per process rather than per batch —
+# this step runs on every training batch and on every inference batch, and
+# reloading a checkpoint each time is exactly the mistake that made the
+# inference loop slow before (see InferenceSession).
+_DL_MODEL_CACHE: dict = {}
+
+
+def _resolve_device(spec):
+    import torch
+    spec = str(spec or "auto")
+    if spec == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(spec)
+
+
+def _instantiate(model_cfg):
+    """Build an object from a `_target_` block.
+
+    Uses `hydra.utils.instantiate` when Hydra is importable (so nested
+    `_target_`s, interpolation and partials behave as everywhere else in this
+    repo), and otherwise falls back to a plain importlib construction. The
+    fallback keeps this data-layer module usable outside a Hydra app — tests,
+    notebooks, `predict.py` — instead of making Hydra a hard requirement of
+    preprocessing.
+    """
+    params = _to_plain_dict(model_cfg)
+    target = params.pop("_target_", None)
+    if not target:
+        raise KeyError("model block needs a `_target_` naming the network class")
+    try:
+        from hydra.utils import instantiate
+    except ImportError:
+        import importlib
+        module_path, _, cls_name = str(target).rpartition(".")
+        cls = getattr(importlib.import_module(module_path), cls_name)
+        return cls(**params)
+    return instantiate(model_cfg)
+
+
+def _load_dl_model(cfg, device):
+    """Instantiate and cache the correction network.
+
+    Two ways to supply it, so the network can be dropped in later without
+    touching this file:
+
+    1. `model:` block with Hydra's `_target_` (plus any constructor kwargs),
+       optionally with `checkpoint:` holding a state_dict. This is the
+       idiomatic route for this repo.
+    2. `checkpoint:` alone pointing at a TorchScript archive
+       (`torch.jit.save`), for a model exported from elsewhere.
+    """
+    import torch
+
+    model_cfg  = cfg.get("model", None)
+    checkpoint = cfg.get("checkpoint", None)
+    target     = model_cfg.get("_target_") if model_cfg else None
+    key        = (str(target), str(checkpoint), str(device))
+    if key in _DL_MODEL_CACHE:
+        return _DL_MODEL_CACHE[key]
+
+    if model_cfg is not None:
+        model = _instantiate(model_cfg)
+        if checkpoint:
+            sd = torch.load(checkpoint, map_location="cpu", weights_only=False)
+            if isinstance(sd, dict):
+                sd = sd.get("state_dict", sd)
+            model.load_state_dict(sd)
+    elif checkpoint:
+        model = torch.jit.load(checkpoint, map_location="cpu")
+    else:
+        raise NotImplementedError(
+            "Step 'dl_mie' has no model yet. Supply either\n"
+            "  model:\n"
+            "    _target_: your.module.YourMieNet\n"
+            "  checkpoint: /path/to/weights.ckpt     # optional state_dict\n"
+            "or a TorchScript archive:\n"
+            "  checkpoint: /path/to/scripted_model.pt"
+        )
+
+    model = model.to(device).eval()
+    _DL_MODEL_CACHE[key] = model
+    return model
+
+
+def _dl_mie(X: np.ndarray, wn: np.ndarray, cfg, state):
+    """Deep-learning Mie scattering correction.
+
+    A learned alternative to `me_emsc`: instead of iteratively fitting a Mie
+    extinction basis per spectrum, a pretrained network maps a scatter-
+    distorted spectrum to its corrected form in one forward pass. That makes
+    it usable per training batch, where ME-EMSC's ~100 ms/spectrum is not.
+
+    The network itself is supplied via config (see `_load_dl_model`) — this
+    function only owns the plumbing: device placement, batching, caching, and
+    the numpy<->torch boundary.
+
+    Model contract
+    --------------
+    Input : float32 tensor `(B, 1, L)` — same layout AACNN consumes.
+    Output: `(B, 1, L)` or `(B, L)`; the channel axis is squeezed if present.
+    L is whatever the preceding steps produced, so if the network is fixed to
+    a particular wavenumber grid put an `interpolate` step before this one.
+
+    Config keys
+    -----------
+    model      : Hydra `_target_` block for the network (+ constructor kwargs)
+    checkpoint : state_dict for the above, or a TorchScript archive on its own
+    device     : 'auto' (default) | 'cpu' | 'cuda' | 'cuda:1'
+    batch_size : spectra per forward pass (default 4096)
+
+    Note this is the learned inverse of the `mie_scattering` augmentation —
+    enabling both simulates scattering and then removes it.
+    """
+    import torch
+
+    device = _resolve_device(cfg.get("device", "auto"))
+    model  = _load_dl_model(cfg, device)
+    bs     = int(cfg.get("batch_size", 4096))
+
+    out = np.empty_like(X, dtype=np.float64)
+    with torch.inference_mode():
+        for start in range(0, X.shape[0], bs):
+            chunk = torch.from_numpy(
+                np.ascontiguousarray(X[start:start + bs], dtype=np.float32)
+            ).unsqueeze(1).to(device)
+            y = model(chunk)
+            if y.ndim == 3:
+                y = y.squeeze(1)
+            out[start:start + bs] = y.detach().float().cpu().numpy()
+
+    return out, wn
+
+
 PREPROC_REGISTRY: dict = {
     "crop":        _crop,
     "savgol":      _savgol,
@@ -282,9 +416,13 @@ PREPROC_REGISTRY: dict = {
     "me_emsc":     _emsc_family,
     "fringe_emsc": _emsc_family,
     "interpolate": _interpolate,
+    "dl_mie":      _dl_mie,
 }
 
 # Steps needing a fit on the training set before they can be applied.
+# `dl_mie` is deliberately NOT here: its network is pretrained and loaded from
+# config, so train and inference stay in sync via the checkpoint path rather
+# than via fitted state.
 STATEFUL = {"emsc", "me_emsc", "fringe_emsc"}
 
 

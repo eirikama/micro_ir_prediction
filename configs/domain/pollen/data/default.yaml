@@ -26,6 +26,13 @@ preprocessing:
     - type: crop
       enabled: False
       keep: [[1000, 1800], [2800, 3000]]
+    - type: dl_mie
+      enabled: False
+      model:
+        _target_: src.models.mie_net.MieCorrectionNet
+      checkpoint: null
+      device: auto
+      batch_size: 4096
     - type: emsc
       enabled: True
       poly_order: 2
